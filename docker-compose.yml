@@ -24,6 +24,20 @@ services:
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
     depends_on:
       - db
+  voting_web: # New service for the voting app
+    build: ./my-flask-app/voting_app
+    ports:
+      - "2000:2000" # Map host port 5000 to container port 5000
+    environment:
+      DB_HOST: db
+      DB_USER: ${MYSQL_USER:-user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-password}
+      DB_NAME: ${MYSQL_DATABASE:-mydatabase}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-a_default_secret_key} # Use a strong key in .env for production
+    depends_on:
+      - db
+      - candidates_web # Depends on candidates_web for candidate data
+      - voters_web     # Depends on voters_web for voter data
 
   db:
     image: mysql:8.0

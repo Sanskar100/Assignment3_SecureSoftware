@@ -1,0 +1,206 @@
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session
+import os
+import mysql.connector
+
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev') # Used for flash messages and sessions
+
+# Database connection details from environment variables
+DB_HOST = os.getenv('DB_HOST', 'db')
+DB_USER = os.getenv('DB_USER', 'user')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'password')
+DB_NAME = os.getenv('DB_NAME', 'mydatabase')
+
+# HTML templates for rendering
+VOTING_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Cast Your Vote</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #e0f7fa; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2, h3 { color: #00796b; }
+        .message { padding: 10px; margin-bottom: 15px; border-radius: 5px; }
+        .message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .message.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        form { margin-top: 20px; padding: 15px; border: 1px solid #b2ebf2; border-radius: 5px; background-color: #e0f2f7; }
+        form input[type="email"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #99d; border-radius: 4px; }
+        form input[type="submit"] { background-color: #009688; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        form input[type="submit"]:hover { background-color: #00796b; }
+        .current-votes { margin-top: 30px; }
+        .vote-item { background-color: #f0f0f0; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
+        .vote-count { font-weight: bold; font-size: 1.2em; color: #00796b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cast Your Vote</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="message {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <p>{{ message }}</p>
+
+        <h2>Vote Now!</h2>
+        <form method="POST" action="/vote">
+            <label for="voter_email">Your Email:</label><br>
+            <input type="email" id="voter_email" name="voter_email" value="{{ session.get('voter_email', '') }}" required><br><br>
+
+            <label for="candidate_id">Select Candidate:</label><br>
+            <select id="candidate_id" name="candidate_id" required>
+                {% if candidates %}
+                    {% for candidate in candidates %}
+                        <option value="{{ candidate[0] }}">{{ candidate[1] }} ({{ candidate[4] }})</option>
+                    {% endfor %}
+                {% else %}
+                    <option value="">No candidates available</option>
+                {% endif %}
+            </select><br><br>
+            <input type="submit" value="Cast Vote">
+        </form>
+
+        <div class="current-votes">
+            <h2>Current Vote Counts</h2>
+            {% if vote_counts %}
+                {% for count in vote_counts %}
+                    <div class="vote-item">
+                        <span>{{ count[0] }}</span>
+                        <span class="vote-count">{{ count[1] }} votes</span>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p>No votes cast yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+def get_db_connection():
+    return mysql.connector.connect(
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME
+    )
+
+def init_db():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Ensure candidates and voters tables exist (they are created by their respective apps)
+        # This app will create its own 'votes' table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS votes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                voter_id INT NOT NULL,
+                candidate_id INT NOT NULL,
+                vote_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (voter_id), # Ensure one vote per voter
+                FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE CASCADE,
+                FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+            );
+        """)
+        conn.commit()
+        print("Database 'votes' table checked/created successfully.")
+    except Exception as e:
+        print(f"Error initializing voting database: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+@app.before_request
+def before_first_request():
+    init_db()
+
+@app.route('/')
+def index():
+    conn = None
+    candidates = []
+    vote_counts = []
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get candidates
+        cursor.execute("SELECT id, name, political_party FROM candidates")
+        candidates = cursor.fetchall()
+
+        # Get vote counts
+        cursor.execute("""
+            SELECT c.name, COUNT(v.id) AS total_votes
+            FROM candidates c
+            LEFT JOIN votes v ON c.id = v.candidate_id
+            GROUP BY c.name
+            ORDER BY total_votes DESC;
+        """)
+        vote_counts = cursor.fetchall()
+
+        return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts, message="Please enter your email and cast your vote!")
+    except Exception as e:
+        flash(f"Error loading data: {e}", 'error')
+        return render_template_string(VOTING_TEMPLATE, candidates=[], vote_counts=[], message=f"Error loading voting data: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/vote', methods=['POST'])
+def cast_vote():
+    voter_email = request.form['voter_email']
+    candidate_id = request.form['candidate_id']
+    session['voter_email'] = voter_email # Remember email in session
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(buffered=True) # buffered=True needed for checking rowcount after execute
+
+        # 1. Verify voter exists and get voter_id
+        cursor.execute("SELECT id FROM voters WHERE email = %s", (voter_email,))
+        voter = cursor.fetchone()
+        if not voter:
+            flash("Error: Voter not registered. Please register your email first.", 'error')
+            return redirect(url_for('index'))
+        voter_id = voter[0]
+
+        # 2. Check if voter has already voted
+        cursor.execute("SELECT id FROM votes WHERE voter_id = %s", (voter_id,))
+        if cursor.fetchone():
+            flash("You have already cast your vote!", 'info')
+            return redirect(url_for('index'))
+
+        # 3. Verify candidate exists (optional, but good for data integrity)
+        cursor.execute("SELECT id FROM candidates WHERE id = %s", (candidate_id,))
+        if not cursor.fetchone():
+            flash("Error: Invalid candidate selected.", 'error')
+            return redirect(url_for('index'))
+
+        # 4. Cast the vote
+        cursor.execute("INSERT INTO votes (voter_id, candidate_id) VALUES (%s, %s)", (voter_id, candidate_id))
+        conn.commit()
+        flash("Your vote has been cast successfully!", 'success')
+
+    except mysql.connector.Error as err:
+        flash(f"Database error: {err}", 'error')
+        conn.rollback() # Rollback in case of an error
+    except Exception as e:
+        flash(f"An unexpected error occurred: {e}", 'error')
+    finally:
+        if conn:
+            conn.close()
+    return redirect(url_for('index'))
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=2000, debug=True)
