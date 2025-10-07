@@ -74,7 +74,7 @@ VOTING_TEMPLATE = """
                 {% for count in vote_counts %}
                     <div class="vote-item">
                         <span>{{ count[0] }}</span>
-                        <span class="vote-count">{{ count[1] }} votes</span>
+                        <span class="vote-count">{{ count[1] }} votes ({{ count[2] }})</span>
                     </div>
                 {% endfor %}
             {% else %}
@@ -107,7 +107,7 @@ def init_db():
                 voter_id INT NOT NULL,
                 candidate_id INT NOT NULL,
                 vote_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (voter_id), # Ensure one vote per voter
+                UNIQUE (voter_id), # Ensure one vote per voter (Security Requirement)
                 FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE CASCADE,
                 FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
             );
@@ -137,7 +137,11 @@ def index():
         cursor.execute("SELECT id, name, political_party FROM candidates")
         candidates = cursor.fetchall()
 
-        # Get vote counts
+        # Get total votes
+        cursor.execute("SELECT COUNT(*) FROM votes")
+        total_votes = cursor.fetchone()[0]
+
+        # Get vote counts per candidate
         cursor.execute("""
             SELECT c.name, COUNT(v.id) AS total_votes
             FROM candidates c
@@ -145,7 +149,13 @@ def index():
             GROUP BY c.name
             ORDER BY total_votes DESC;
         """)
-        vote_counts = cursor.fetchall()
+        raw_vote_counts = cursor.fetchall()
+
+        # Calculate percentage for each candidate
+        vote_counts = []
+        for name, count in raw_vote_counts:
+            percent = (count / total_votes * 100) if total_votes > 0 else 0
+            vote_counts.append((name, count, f"{percent:.2f}%"))
 
         return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts, message="Please enter your email and cast your vote!")
     except Exception as e:
@@ -180,7 +190,7 @@ def cast_vote():
             flash("You have already cast your vote!", 'info')
             return redirect(url_for('index'))
 
-        # 3. Verify candidate exists (optional, but good for data integrity)
+        # 3. Verify candidate exists (data integrity)
         cursor.execute("SELECT id FROM candidates WHERE id = %s", (candidate_id,))
         if not cursor.fetchone():
             flash("Error: Invalid candidate selected.", 'error')
