@@ -190,7 +190,7 @@ def cast_vote():
             flash("You have already cast your vote!", 'info')
             return redirect(url_for('index'))
 
-        # 3. Verify candidate exists (data integrity) security requirement
+        # 3. Verify candidate exists (data integrity)
         cursor.execute("SELECT id FROM candidates WHERE id = %s", (candidate_id,))
         if not cursor.fetchone():
             flash("Error: Invalid candidate selected.", 'error')
