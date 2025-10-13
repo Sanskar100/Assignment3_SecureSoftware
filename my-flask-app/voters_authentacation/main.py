@@ -1,7 +1,15 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session
 import os
+import mysql.connector
+import bcrypt
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24) #session management
+
+DB_HOST = os.getenv('DB_HOST', 'db')
+DB_USER = os.getenv('DB_USER', 'user')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'password')
+DB_NAME = os.getenv('DB_NAME', 'mydatabase')
 
 REGISTER_TEMPLATE = """
 <!doctype html>
@@ -44,4 +52,5 @@ REGISTER_TEMPLATE = """
 </body>
 </html>
 """
+
 
