@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy & Security Policy | Online Voting System</title>
+  <style>
+    :root { --brand:#0ea5a4; --ink:#0f172a; --muted:#475569; --bg:#ffffff }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+    .container{max-width:900px;margin:0 auto;padding:32px}
+    header,.card{background:white;border-radius:8px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+    header{margin-bottom:24px}
+    h1{margin:0 0 8px;font-size:28px;color:var(--brand)}
+    h2{margin:24px 0 8px}
+    p,li{color:var(--muted);line-height:1.7}
+    ul{margin:0 0 0 18px}
+    .muted{font-size:14px;color:#64748b}
+    a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Privacy & Security Policy</h1>
+      <p class="muted">Last updated: <span id="lastUpdated">2025-10-11</span></p>
+    </header>
+
+    <section class="card">
+      <h2>Scope</h2>
+      <p>This policy explains how we collect, use, store, and protect data in the Online Voting System. It applies to voters, administrators, and observers who use the platform.</p>
+    </section>
+
+    <section class="card">
+      <h2>Data We Collect</h2>
+      <ul>
+        <li>Voter data: name, email, verification status, and voting eligibility.</li>
+        <li>Ballots: a cryptographic record that a ballot was cast; the specific choice is stored separately and never linked back to identity in reports.</li>
+        <li>Operational data: device/browser metadata, IP address, timestamps, and audit logs.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>How We Use Data</h2>
+      <ul>
+        <li>To verify eligibility and enforce one-person-one-vote.</li>
+        <li>To tally results and prevent fraud or duplicate voting.</li>
+        <li>To secure the platform, detect abuse, and generate aggregated, anonymized statistics.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Security Controls</h2>
+      <ul>
+        <li>Transport security: all traffic is protected with HTTPS/TLS 1.2+.</li>
+        <li>Data at rest: sensitive data encrypted using AES-256 or a comparable standard.</li>
+        <li>Access control: role-based access (admin vs voter), least-privilege, and MFA for admins.</li>
+        <li>Application security: input validation, CSRF protection, rate limiting, and brute-force defenses.</li>
+        <li>Auditability: immutable logs for admin actions and ballot events with timestamps.</li>
+        <li>Backups: encrypted backups with tested restoration procedures.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Ballot Secrecy</h2>
+      <p>We separate voter identity from ballot selections during tallying and reporting. Aggregate counts are published; individual choices are never revealed to administrators or other voters.</p>
+    </section>
+
+    <section class="card">
+      <h2>Retention</h2>
+      <ul>
+        <li>Voter records and logs: retained for the election period and audit window defined by the organizer.</li>
+        <li>Ballot data: kept only as long as necessary to verify results and comply with audit or legal requirements.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Your Rights</h2>
+      <ul>
+        <li>Access and correction of your registered information.</li>
+        <li>Deletion after the election period where legally permissible.</li>
+        <li>Right to lodge complaints with the organizing body or relevant authority.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Third Parties</h2>
+      <p>We do not sell personal data. If email delivery or hosting providers are used, they are bound by data processing agreements and security standards.</p>
+    </section>
+
+    <section class="card">
+      <h2>Compliance</h2>
+      <ul>
+        <li>Follow the organizer’s jurisdictional requirements (e.g., GDPR for EU users, local data protection laws).</li>
+        <li>Conduct periodic security reviews and vulnerability remediation.</li>
+        <li>Provide incident response with user notification where required by law.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Contact</h2>
+      <p>For privacy or security inquiries, contact your election administrator. If you need a product support email, tell me explicitly and I will provide it.</p>
+    </section>
+
+    <p class="muted">This policy may be updated; material changes will be communicated on this page.</p>
+  </div>
+  <script>
+    // Optional: keep the "Last updated" date in sync with your deployment
+    // document.getElementById('lastUpdated').textContent = new Date().toISOString().slice(0,10);
+  </script>
+</body>
+</html>

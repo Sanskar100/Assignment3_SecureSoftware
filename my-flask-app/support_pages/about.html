@@ -1,11 +1,63 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About Page</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About | Online Voting System</title>
+  <link rel="icon" href="/favicon.ico" />
+  <style>
+    :root { --brand:#0ea5a4; --ink:#0f172a; --muted:#475569; --bg:#e6f7f7; }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+    .container{max-width:900px;margin:0 auto;padding:32px}
+    header{background:white;border-radius:8px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:24px}
+    h1{margin:0 0 8px;font-size:28px;color:var(--brand)}
+    h2{margin:24px 0 8px}
+    p,li{color:var(--muted);line-height:1.6}
+    .card{background:white;border-radius:8px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:16px}
+    a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
+    footer{color:#64748b;font-size:14px;margin-top:24px}
+  </style>
 </head>
 <body>
-    <p>About</p>
+  <div class="container">
+    <header>
+      <h1>About the Online Voting System</h1>
+      <p>Our goal is to provide a simple, secure, and transparent way for communities to run elections online.</p>
+    </header>
+
+    <section class="card">
+      <h2>Purpose</h2>
+      <p>This system enables administrators to register candidates and voters, while eligible voters can securely cast one vote per election. It is designed for student bodies, clubs, associations, and small organizations.</p>
+    </section>
+
+    <section class="card">
+      <h2>Transparency and Integrity</h2>
+      <ul>
+        <li>One-person-one-vote via email verification and unique voter records.</li>
+        <li>Immutable vote logs with timestamps for auditability (no ballot content exposure).</li>
+        <li>Real-time aggregate results without revealing individual choices.</li>
+        <li>Role-based access control separates admin tasks from voting actions.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>How It Works</h2>
+      <ol>
+        <li>Admins add candidates.</li>
+        <li>Admins register voters or share a self-registration link.</li>
+        <li>Voters verify their email and cast a vote.</li>
+        <li>The system tallies results and prevents duplicate ballots.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Technology and Reliability</h2>
+      <p>Built with a modern web stack and secured with HTTPS, input validation, and database constraints to ensure data integrity and uptime during voting windows.</p>
+    </section>
+
+    <footer>
+      <p>See our <a href="/policy.html">Privacy & Security Policy</a> and <a href="/help.html">Help Center</a>.</p>
+    </footer>
+  </div>
 </body>
 </html>
