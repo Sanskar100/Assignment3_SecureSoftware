@@ -319,21 +319,21 @@ def captcha_generation():
     question = f"What is {num1} {operation} {num2}?"
     return question, answer
 
-def email_otp(email, otp):
-    msg = MIMEText(f"Your OTP for login is: {otp}. Use within 5 minutes.")
-    msg['Subject'] = 'Voter Login OTP Code'
-    msg['From'] = SMTP_USER
-    msg['To'] = email
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, [email], msg.as_string())
-            server.quit()
-            return True
-    except Exception as e:
-        print(f"Failed to send OTP to: {e}")
-        return False
+# def email_otp(email, otp):
+#     msg = MIMEText(f"Your OTP for login is: {otp}. Use within 5 minutes.")
+#     msg['Subject'] = 'Voter Login OTP Code'
+#     msg['From'] = SMTP_USER
+#     msg['To'] = email
+#     try:
+#         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+#             server.starttls()
+#             server.login(SMTP_USER, SMTP_PASSWORD)
+#             server.sendmail(SMTP_USER, [email], msg.as_string())
+#             server.quit()
+#             return True
+#     except Exception as e:
+#         print(f"Failed to send OTP to: {e}")
+#         return False
     
 def audit_log(user_id, action, details, ip_address):
     conn = None
@@ -369,6 +369,56 @@ def rate_limitcheck(ip):
 rate_limit={}
 Max_Ratelimit=5
 Rate_Limitwindow=360 # 6 minute
+
+# def is_ip_blacklisted(ip):
+#     return ip in blacklisted_ips
+# blacklisted_ips=set()
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        name = request.form['name']
+        email = request.form['email']
+        password = request.form['password']
+        captcha_response = request.form['captcha']
+        captcha_answer = session.get('captcha_answer')
+
+        if not captcha_answer or str(captcha_response) != str(captcha_answer):
+            flash("CAPTCHA answer is incorrect. Please try again.", 'error')
+            return redirect(url_for('register'))
+
+        password_check = password_validation(password)
+        if password_check != True:
+            flash(password_check, 'error')
+            return redirect(url_for('register'))
+
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM voters WHERE email = %s", (email,))
+            if cursor.fetchone():
+                flash("Email already registered. Please use a different email.", 'error')
+                return redirect(url_for('register'))
+
+            cursor.execute("INSERT INTO voters (name, email, password) VALUES (%s, %s, %s)", (name, email, hashed_password))
+            conn.commit()
+            flash("Registration successful! You can now log in.", 'success')
+            return redirect(url_for('login'))
+        except mysql.connector.Error as err:
+            flash(f"Database error: {err}", 'error')
+        except Exception as e:
+            flash(f"An unexpected error occurred: {e}", 'error')
+        finally:
+            if conn:
+                conn.close()
+        return redirect(url_for('register'))
+    else:
+        captcha_question, captcha_answer = captcha_generation()
+        session['captcha_answer'] = captcha_answer
+        return render_template_string(Register_Voter, captcha_question=captcha_question)
 
 
 
