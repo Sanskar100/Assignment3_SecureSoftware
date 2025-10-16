@@ -255,15 +255,36 @@ def init_db():
                 FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
             );
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS voters (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                status ENUM('submitted', 'accepted') DEFAULT 'submitted',
+                role ENUM('voter') DEFAULT 'voter'
+            );
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                action VARCHAR(255),
+                details TEXT,
+                ip_address VARCHAR(45),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         conn.commit()
-        print("Database 'votes' table checked/created successfully.")
+        print("Database tables checked/created successfully.")
     except Exception as e:
         print(f"Error initializing voting database: {e}")
     finally:
         if conn:
             conn.close()
 
-@app.before_request
+@app.before_first_request
 def before_first_request():
     init_db()
 
