@@ -476,6 +476,50 @@ def login():
         captcha_question, captcha_answer = captcha_generation()
         session['captcha_answer'] = captcha_answer
         return render_template_string(Login_Voter, captcha_question=captcha_question)
+    
+@app.route('/verify_otp', methods=['GET', 'POST'])
+def verify_otp():
+    if request.method == 'POST':
+        entered_otp = request.form['otp']
+        saved_otp = session.get('otp')
+        otp_time = session.get('otp_time')
+        pending_voter_id = session.get('pending_voter_id')
+        pending_voter_name = session.get('pending_voter_name')
+        ip_address = request.remote_addr
+
+        if not saved_otp or not otp_time or not pending_voter_id:
+            flash("Session expired. Please log in again.", 'error')
+            return redirect(url_for('login'))
+
+        if time.time() - otp_time > 300:  # OTP valid for 5 minutes
+            flash("OTP expired. Please log in again.", 'error')
+            return redirect(url_for('login'))
+
+        if entered_otp == saved_otp:
+            session.pop('otp', None)
+            session.pop('otp_time', None)
+            session.pop('pending_voter_id', None)
+            session.pop('pending_voter_name', None)
+            session['voter_id'] = pending_voter_id
+            session['voter_name'] = pending_voter_name
+            audit_log(pending_voter_id, 'login_success', 'Voter logged in successfully', ip_address)
+            flash("Login successful!", 'success')
+            return redirect(url_for('index'))
+        else:
+            audit_log(pending_voter_id, 'failed_otp', 'Invalid OTP entered', ip_address)
+            flash("Invalid OTP. Please try again.", 'error')
+            return redirect(url_for('verify_otp'))
+    else:
+        return render_template_string(Voter_OTP)
+    
+@app.route('/logout')
+def logout():
+    audit_log(session.get('voter_id'), 'logout', 'User logged out', request.remote_addr)
+    session.clear()
+    flash("Logged out successfully.", 'success')
+    return redirect(url_for('login'))
+
+
 
 
 @app.route('/')
