@@ -302,6 +302,19 @@ def password_validation(password):
         return "Password must contain at least one special character."
     return True
 
+def captcha_generation():
+    num1 = random.randint(1, 10)
+    num2 = random.randint(1, 10)
+    operation = random.choice(['+', '-', '*'])
+    if operation == '+':
+        answer = num1 + num2
+    elif operation == '-':
+        answer = num1 - num2
+    else:
+        answer = num1 * num2
+    question = f"What is {num1} {operation} {num2}?"
+    return question, answer
+
 @app.route('/')
 def index():
     conn = None
