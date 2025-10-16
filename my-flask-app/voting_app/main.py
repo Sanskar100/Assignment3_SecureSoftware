@@ -172,12 +172,13 @@ VOTING_TEMPLATE = """
         .message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .message.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
         form { margin-top: 20px; padding: 15px; border: 1px solid #b2ebf2; border-radius: 5px; background-color: #e0f2f7; }
-        form input[type="email"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #99d; border-radius: 4px; }
+        form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #99d; border-radius: 4px; }
         form input[type="submit"] { background-color: #009688; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         form input[type="submit"]:hover { background-color: #00796b; }
         .current-votes { margin-top: 30px; }
         .vote-item { background-color: #f0f0f0; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
         .vote-count { font-weight: bold; font-size: 1.2em; color: #00796b; }
+        .logout { margin-top: 20px; }
     </style>
 </head>
 <body>
@@ -192,13 +193,8 @@ VOTING_TEMPLATE = """
         {% endif %}
         {% endwith %}
 
-        <p>{{ message }}</p>
-
         <h2>Vote Now!</h2>
         <form method="POST" action="/vote">
-            <label for="voter_email">Your Email:</label><br>
-            <input type="email" id="voter_email" name="voter_email" value="{{ session.get('voter_email', '') }}" required><br><br>
-
             <label for="candidate_id">Select Candidate:</label><br>
             <select id="candidate_id" name="candidate_id" required>
                 {% if candidates %}
@@ -225,11 +221,14 @@ VOTING_TEMPLATE = """
                 <p>No votes cast yet.</p>
             {% endif %}
         </div>
+
+        <div class="logout">
+            <a href="/logout">Logout</a>
+        </div>
     </div>
 </body>
 </html>
 """
-
 def get_db_connection():
     return mysql.connector.connect(
         host=DB_HOST,
