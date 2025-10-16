@@ -334,6 +334,43 @@ def email_otp(email, otp):
     except Exception as e:
         print(f"Failed to send OTP to: {e}")
         return False
+    
+def audit_log(user_id, action, details, ip_address):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO audit_logs (user_id, action, details, ip_address)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, action, details, ip_address))
+        conn.commit()
+    except Exception as e:
+        print(f"Failed to log audit entry: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def rate_limitcheck(ip):
+    now=time.time()
+    if ip in rate_limit:
+        count, last_time=rate_limit[ip]
+        if now - last_time < Rate_Limitwindow:
+            if count >= Max_Ratelimit:
+                return False
+            rate_limit[ip]=(count+1, last_time)
+            return True
+        else:
+            rate_limit[ip]=(1, now)
+            return True
+    else:
+        rate_limit[ip]=(1, now)
+        return True
+rate_limit={}
+Max_Ratelimit=5
+Rate_Limitwindow=360 # 6 minute
+
+
 
 @app.route('/')
 def index():
