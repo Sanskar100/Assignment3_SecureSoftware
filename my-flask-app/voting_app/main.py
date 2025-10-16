@@ -4,6 +4,10 @@ import mysql.connector
 import bcrypt
 import re
 import random
+from email.mime.text import MIMEText
+import smtplib
+import time
+
 
 
 
@@ -314,6 +318,22 @@ def captcha_generation():
         answer = num1 * num2
     question = f"What is {num1} {operation} {num2}?"
     return question, answer
+
+def email_otp(email, otp):
+    msg = MIMEText(f"Your OTP for login is: {otp}. Use within 5 minutes.")
+    msg['Subject'] = 'Voter Login OTP Code'
+    msg['From'] = SMTP_USER
+    msg['To'] = email
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, [email], msg.as_string())
+            server.quit()
+            return True
+    except Exception as e:
+        print(f"Failed to send OTP to: {e}")
+        return False
 
 @app.route('/')
 def index():
