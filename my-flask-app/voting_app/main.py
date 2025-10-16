@@ -1,6 +1,7 @@
 from flask import Flask, render_template_string, request, redirect, url_for, flash, session
 import os
 import mysql.connector
+import bcrypt
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev') # Used for flash messages and sessions
@@ -10,6 +11,54 @@ DB_HOST = os.getenv('DB_HOST', 'db')
 DB_USER = os.getenv('DB_USER', 'user')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'password')
 DB_NAME = os.getenv('DB_NAME', 'mydatabase')
+
+#login section
+Login_Voter="""
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Login</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #e0f7fa; color: #333; }
+        .container { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #00796b; }
+        .message { padding: 10px; margin-bottom: 15px; border-radius: 5px; }
+        .message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .message.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        form { margin-top: 20px; padding: 15px; border: 1px solid #b2ebf2; border-radius: 5px; background-color: #e0f2f7; }
+        form input[type="email"], form input[type="password"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #99d; border-radius: 4px; }
+        form input[type="submit"] { background-color: #009688; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        form input[type="submit"]:hover { background-color: #00796b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Voter Login</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="message {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="/login">
+            <label for="email">Email:</label><br>
+            <input type="email" id="email" name="email" required><br><br>
+            <label for="password">Password:</label><br>
+            <input type="password" id="password" name="password" required><br><br>
+            <input type="submit" value="Login">
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+    
 
 # HTML templates for rendering
 VOTING_TEMPLATE = """
