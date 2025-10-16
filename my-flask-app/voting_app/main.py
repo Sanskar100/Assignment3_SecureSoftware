@@ -519,11 +519,12 @@ def logout():
     flash("Logged out successfully.", 'success')
     return redirect(url_for('login'))
 
-
-
-
 @app.route('/')
 def index():
+    if 'voter_id' not in session:
+        flash("Please log in to access the voting page.", 'error')
+        return redirect(url_for('login'))
+    
     conn = None
     candidates = []
     vote_counts = []
@@ -532,7 +533,7 @@ def index():
         cursor = conn.cursor()
 
         # Get candidates
-        cursor.execute("SELECT id, name, political_party FROM candidates")
+        cursor.execute("SELECT id, name, age, political_party FROM candidates")
         candidates = cursor.fetchall()
 
         # Get vote counts
@@ -545,53 +546,44 @@ def index():
         """)
         vote_counts = cursor.fetchall()
 
-        return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts, message="Please enter your email and cast your vote!")
+        return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts,)
     except Exception as e:
         flash(f"Error loading data: {e}", 'error')
-        return render_template_string(VOTING_TEMPLATE, candidates=[], vote_counts=[], message=f"Error loading voting data: {e}")
+        return render_template_string(VOTING_TEMPLATE, candidates=[], vote_counts=[])
     finally:
         if conn:
             conn.close()
 
-@app.route('/vote', methods=['POST'])
-def cast_vote():
-    voter_email = request.form['voter_email']
+@app.route('/vote', methods=['GET'])
+def vote_get():
+    if 'voter_id' not in session:
+        flash("Please log in to access the voting page.", 'error')
+        return redirect(url_for('login'))
+    
     candidate_id = request.form['candidate_id']
-    session['voter_email'] = voter_email # Remember email in session
+    voter_id = session['voter_id']
 
-    conn = None
+    conn=None
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(buffered=True) # buffered=True needed for checking rowcount after execute
+        cursor = conn.cursor # buffered=True needed for checking rowcount after execute
 
-        # 1. Verify voter exists and get voter_id
-        cursor.execute("SELECT id FROM voters WHERE email = %s", (voter_email,))
-        voter = cursor.fetchone()
-        if not voter:
-            flash("Error: Voter not registered. Please register your email first.", 'error')
-            return redirect(url_for('index'))
-        voter_id = voter[0]
-
-        # 2. Check if voter has already voted
+        # 1. Check if voter has already voted
         cursor.execute("SELECT id FROM votes WHERE voter_id = %s", (voter_id,))
         if cursor.fetchone():
             flash("You have already cast your vote!", 'info')
             return redirect(url_for('index'))
 
-        # 3. Verify candidate exists (optional, but good for data integrity)
+        # 2. Verify candidate exists (optional, but good for data integrity)
         cursor.execute("SELECT id FROM candidates WHERE id = %s", (candidate_id,))
         if not cursor.fetchone():
             flash("Error: Invalid candidate selected.", 'error')
             return redirect(url_for('index'))
 
-        # 4. Cast the vote
+        # 3. Cast the vote
         cursor.execute("INSERT INTO votes (voter_id, candidate_id) VALUES (%s, %s)", (voter_id, candidate_id))
         conn.commit()
         flash("Your vote has been cast successfully!", 'success')
-
-    except mysql.connector.Error as err:
-        flash(f"Database error: {err}", 'error')
-        conn.rollback() # Rollback in case of an error
     except Exception as e:
         flash(f"An unexpected error occurred: {e}", 'error')
     finally:
