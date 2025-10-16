@@ -319,21 +319,21 @@ def captcha_generation():
     question = f"What is {num1} {operation} {num2}?"
     return question, answer
 
-# def email_otp(email, otp):
-#     msg = MIMEText(f"Your OTP for login is: {otp}. Use within 5 minutes.")
-#     msg['Subject'] = 'Voter Login OTP Code'
-#     msg['From'] = SMTP_USER
-#     msg['To'] = email
-#     try:
-#         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-#             server.starttls()
-#             server.login(SMTP_USER, SMTP_PASSWORD)
-#             server.sendmail(SMTP_USER, [email], msg.as_string())
-#             server.quit()
-#             return True
-#     except Exception as e:
-#         print(f"Failed to send OTP to: {e}")
-#         return False
+def email_otp(email, otp):
+    msg = MIMEText(f"Your OTP for login is: {otp}. Use within 5 minutes.")
+    msg['Subject'] = 'Voter Login OTP Code'
+    msg['From'] = SMTP_USER
+    msg['To'] = email
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, [email], msg.as_string())
+            server.quit()
+            return True
+    except Exception as e:
+        print(f"Failed to send OTP to: {e}")
+        return False
     
 def audit_log(user_id, action, details, ip_address):
     conn = None
@@ -370,9 +370,9 @@ rate_limit={}
 Max_Ratelimit=5
 Rate_Limitwindow=360 # 6 minute
 
-# def is_ip_blacklisted(ip):
-#     return ip in blacklisted_ips
-# blacklisted_ips=set()
+def is_ip_blacklisted(ip):
+    return ip in blacklisted_ips
+blacklisted_ips=set()
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -420,6 +420,62 @@ def register():
         session['captcha_answer'] = captcha_answer
         return render_template_string(Register_Voter, captcha_question=captcha_question)
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        captcha_response = request.form['captcha']
+        captcha_answer = session.get('captcha_answer')
+        ip_address = request.remote_addr
+
+        if not rate_limitcheck(ip_address):
+            flash("Too many login attempts. Please try again later.", 'error')
+            return redirect(url_for('login'))
+
+        if not captcha_answer or str(captcha_response) != str(captcha_answer):
+            flash("CAPTCHA answer is incorrect. Please try again.", 'error')
+            return redirect(url_for('login'))
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, password, status, role FROM voters WHERE email = %s", (email,))
+            voter = cursor.fetchone()
+            if voter:
+                voter_id, voter_name, hashed_password, status, role = voter
+                if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    if status == 'accepted' and role == 'voter':
+                        otp = random.randint(100000, 999999)
+                        session['otp'] = str(otp)
+                        session['otp_time'] = time.time()
+                        session['pending_voter_id'] = voter_id
+                        session['pending_voter_name'] = voter_name
+                        if email_otp(email, otp):
+                            audit_log(voter_id, 'login_attempt', 'OTP sent', ip_address)
+                            flash("OTP sent to your email.", 'info')
+                            return redirect(url_for('verify_otp'))
+                        else:
+                            flash("Failed to send OTP.", 'error')
+                    else:
+                        flash("Account not approved or invalid role.", 'error')
+                else:
+                    audit_log(None, 'failed_login', 'Invalid password', ip_address)
+                    flash("Invalid credentials.", 'error')
+            else:
+                audit_log(None, 'failed_login', 'Invalid email', ip_address)
+                flash("Invalid credentials.", 'error')
+        except Exception as e:
+            flash(str(e), 'error')
+        finally:
+            if conn:
+                conn.close()
+        return redirect(url_for('login'))
+    else:
+        captcha_question, captcha_answer = captcha_generation()
+        session['captcha_answer'] = captcha_answer
+        return render_template_string(Login_Voter, captcha_question=captcha_question)
 
 
 @app.route('/')
