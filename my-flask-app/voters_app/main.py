@@ -134,11 +134,32 @@ def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Election officers table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS elec_officers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                role ENUM('elec_officer') DEFAULT 'elec_officer'
+            );
+        """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voters (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
-                email VARCHAR(255) NOT NULL UNIQUE
+                email VARCHAR(255) NOT NULL UNIQUE,
+                status ENUM('submitted', 'accepted', 'rejected') DEFAULT 'submitted'
+            );
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                action VARCHAR(255),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip VARCHAR(45),
+                details TEXT
             );
         """)
         conn.commit()
