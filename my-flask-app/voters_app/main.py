@@ -383,6 +383,36 @@ def elec_officer_login():
 
     return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
 
+@app.route('/verify_otp', methods=['GET', 'POST'])
+def verify_otp():
+    if 'pending_elec_officer_id' not in session:
+        flash("No pending login found", 'error')
+        return redirect(url_for('elec_officer_login'))
+    
+    if request.method == 'POST':
+        otp = request.form['otp']
+        if time.time() > session.get('otp_expiry', 0):
+            log_audit(session['pending_elec_officer_id'], 'otp_expired', request.remote_addr)
+            flash("OTP expired", 'error')
+            session.clear()
+            return redirect(url_for('elec_officer_login'))
+        
+        if otp == session['otp']:
+            session['elec_officer_id'] = session.pop('pending_elec_officer_id')
+            session['elec_officer_name'] = session.pop('pending_elec_officer_name')
+            session.pop('otp')
+            session.pop('otp_expiry')
+            log_audit(session['elec_officer_id'], 'login_success', request.remote_addr)
+            flash("Login successful", 'message')
+            return redirect(url_for('index'))
+        else:
+            log_audit(session['pending_elec_officer_id'], 'failed_otp', request.remote_addr)
+            flash("Invalid OTP", 'error')
+            return render_template_string(ELEC_OFFICER_OTP_TEMPLATE)
+
+    return render_template_string(ELEC_OFFICER_OTP_TEMPLATE)
+
+
 @app.route('/')
 def index():
     conn = None
