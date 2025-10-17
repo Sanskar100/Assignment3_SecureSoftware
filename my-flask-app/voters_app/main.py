@@ -259,6 +259,15 @@ def init_db():
         if conn:
             conn.close()
 
+def require_elec_officer_login(f):
+    def decorated_function(*args, **kwargs):
+        if 'elec_officer_id' not in session:
+            flash("Please log in to access this page", 'error')
+            return redirect(url_for('elec_officer_login'))
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
 @app.before_request
 def before_first_request():
     init_db()
@@ -419,34 +428,41 @@ def index():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM voters")
+        cursor.execute("SELECT id, name, email, status FROM voters")
         voters = cursor.fetchall()
+        log_audit(session['elec_officer_id'], 'view_voters', request.remote_addr)
         return render_template_string(VOTERS_TEMPLATE, voters=voters, message="Welcome to the Voter Registration App!")
     except Exception as e:
+        log_audit(session['elec_officer_id'], 'view_voters_error', request.remote_addr, details=str(e))
+        flash(f"Error loading voters: {e}", 'error')
         return render_template_string(VOTERS_TEMPLATE, voters=[], message=f"Error loading voters: {e}")
     finally:
         if conn:
             conn.close()
 
 @app.route('/add', methods=['POST'])
+@require_elec_officer_login
 def add_voter():
     name = request.form['name']
     email = request.form['email']
-
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO voters (name, email) VALUES (%s, %s)", (name, email))
+        cursor.execute("INSERT INTO voters (name, email, status) VALUES (%s, %s, 'submitted')", (name, email))
         conn.commit()
+        log_audit(session['elec_officer_id'], 'add_voter', request.remote_addr, details=f"Added voter {name} ({email})")
+        flash("Voter added successfully", 'message')
     except Exception as e:
-        print(f"Error adding voter: {e}")
+        log_audit(session['elec_officer_id'], 'add_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error adding voter: {e}", 'error')
     finally:
         if conn:
             conn.close()
     return redirect(url_for('index'))
 
 @app.route('/edit/<int:voter_id>', methods=['GET', 'POST'])
+@require_elec_officer_login
 def edit_voter(voter_id):
     conn = None
     try:
@@ -458,22 +474,29 @@ def edit_voter(voter_id):
             email = request.form['email']
             cursor.execute("UPDATE voters SET name = %s, email = %s WHERE id = %s", (name, email, voter_id))
             conn.commit()
+            log_audit(session['elec_officer_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}")
+            flash("Voter updated successfully", 'message')
             return redirect(url_for('index'))
         else: # GET request to show edit form
-            cursor.execute("SELECT * FROM voters WHERE id = %s", (voter_id,))
+            cursor.execute("SELECT id, name, email, status FROM voters WHERE id = %s", (voter_id,))
             voter = cursor.fetchone()
             if voter:
+                log_audit(session['elec_officer_id'], 'view_edit_voter', request.remote_addr, details=f"Viewing edit form for voter ID {voter_id}")
                 return render_template_string(VOTERS_TEMPLATE, edit_voter=voter, message=f"Editing Voter ID: {voter_id}")
             else:
+                log_audit(session['elec_officer_id'], 'view_edit_voter_error', request.remote_addr, details=f"Voter ID {voter_id} not found")
+                flash("Voter not found", 'error')
                 return redirect(url_for('index'))
     except Exception as e:
-        print(f"Error editing voter: {e}")
+        log_audit(session['elec_officer_id'], 'edit_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error editing voter: {e}", 'error')
         return redirect(url_for('index'))
     finally:
         if conn:
             conn.close()
 
 @app.route('/delete/<int:voter_id>', methods=['POST'])
+@require_elec_officer_login
 def delete_voter(voter_id):
     conn = None
     try:
@@ -481,12 +504,22 @@ def delete_voter(voter_id):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM voters WHERE id = %s", (voter_id,))
         conn.commit()
+        log_audit(session['elec_officer_id'], 'delete_voter', request.remote_addr, details=f"Deleted voter ID {voter_id}")
+        flash("Voter deleted successfully", 'message')
     except Exception as e:
+        log_audit(session['elec_officer_id'], 'delete_voter_error', request.remote_addr, details=str(e))
         print(f"Error deleting voter: {e}")
     finally:
         if conn:
             conn.close()
     return redirect(url_for('index'))
+
+@app.route('/logout')
+def logout():
+    log_audit(session.get('elec_officer_id'), 'logout', request.remote_addr)
+    session.clear()
+    flash("Logged out successfully", 'message')
+    return redirect(url_for('elec_officer_login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=4000, debug=True)
