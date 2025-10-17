@@ -142,8 +142,14 @@ VOTERS_TEMPLATE = """
 <body>
     <div class="container">
         <h1>Voter Registration Application</h1>
-        <p>{{ message }}</p>
-
+        <p>Welcome, {{ session['elec_officer_name'] }}! <a class="logout-link" href="/logout">Logout</a></p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
         {% if edit_voter %}
         <h2>Edit Voter (ID: {{ edit_voter[0] }})</h2>
         <form method="POST" action="/edit/{{ edit_voter[0] }}">
@@ -163,6 +169,7 @@ VOTERS_TEMPLATE = """
                     <th>ID</th>
                     <th>Name</th>
                     <th>Email</th>
+                    <th>Status</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -172,6 +179,7 @@ VOTERS_TEMPLATE = """
                     <td>{{ voter[0] }}</td>
                     <td>{{ voter[1] }}</td>
                     <td>{{ voter[2] }}</td>
+                    <td>{{ voter[3] }}</td>
                     <td class="action-buttons">
                         <form class="delete-form" method="GET" action="/edit/{{ voter[0] }}">
                             <input type="submit" value="Edit" class="edit-button">
@@ -185,7 +193,7 @@ VOTERS_TEMPLATE = """
             </tbody>
         </table>
         {% else %}
-        <p>No voters registered yet. Add one below!</p>
+        <p>No voters registered yet. Add one below</p>
         {% endif %}
 
         <h2>Register New Voter</h2>
@@ -254,6 +262,35 @@ def init_db():
 @app.before_request
 def before_first_request():
     init_db()
+
+def validate_password_strength(password):
+    if len(password) < 8 or not re.search("[A-Z]", password) or not re.search("[a-z]", password) or not re.search("\d", password) or not re.search("[!@#$%^&*]", password):
+        return False
+    return True
+
+def generate_captcha():
+    num1 = random.randint(1, 10)
+    num2 = random.randint(1, 10)
+    operation = random.choice(['+', '-'])
+    question = f"What is {num1} {operation} {num2}?"
+    answer = num1 + num2 if operation == '+' else num1 - num2
+    return question, str(answer)
+
+def send_otp(email, otp):
+    msg = MIMEText(f"Your Election Officer OTP is {otp}")
+    msg['Subject'] = 'Election Officer Login OTP'
+    msg['From'] = SMTP_USER
+    msg['To'] = email
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.sendmail(SMTP_USER, email, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Error sending OTP: {e}")
+        return False
 
 @app.route('/')
 def index():
