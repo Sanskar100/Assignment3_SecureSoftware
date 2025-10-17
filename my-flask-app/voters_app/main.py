@@ -291,6 +291,97 @@ def send_otp(email, otp):
     except Exception as e:
         print(f"Error sending OTP: {e}")
         return False
+def log_audit(user_id, action, ip, details=''):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO audit_logs (user_id, action, ip, details) VALUES (%s, %s, %s, %s)", (user_id, action, ip, details))
+        conn.commit()
+    except Exception as e:
+        print(f"Error logging audit: {e}")
+    finally:
+        if conn:
+            conn.close()
+def is_ip_blacklisted(ip):
+    return ip in BLACKLISTED_IPS
+
+def check_rate_limit(ip):
+    now = time.time()
+    if ip in rate_limit_dict:
+        count, last_time = rate_limit_dict[ip]
+        if now - last_time < RATE_LIMIT_WINDOW:
+            if count >= RATE_LIMIT_MAX:
+                return False
+            rate_limit_dict[ip] = (count + 1, last_time)
+            return True
+        rate_limit_dict[ip] = (1, now)
+        return True
+    rate_limit_dict[ip] = (1, now)
+    return True
+
+@app.route('/login', methods=['GET', 'POST'])
+def elec_officer_login():
+    ip = request.remote_addr
+    if is_ip_blacklisted(ip) or not check_rate_limit(ip):
+        log_audit(None, 'access_denied', ip, details="Rate limit or blacklist violation")
+        flash("Access denied due to rate limit or blacklist", 'error')
+        return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question="")
+    
+    captcha_question, captcha_answer = generate_captcha()
+    if request.method == 'POST':
+        email = request.form['email'].strip()
+        password = request.form['password']
+        captcha_response = request.form['captcha']
+
+        if captcha_response != captcha_answer:
+            flash("CAPTCHA incorrect. Please try again.", 'error')
+            log_audit(None, 'failed_login', ip, details="Incorrect CAPTCHA")
+            return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, password FROM elec_officers WHERE email = %s", (email,))
+            officer = cursor.fetchone()
+            if officer:
+                officer_id, officer_name, hashed_password, role = officer
+                if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    if role == 'elec_officer':
+                        otp = str(random.randint(100000, 999999))
+                        session['otp'] = otp
+                        session['otp_expiry'] = time.time() + 300  # 5 minutes
+                        session['pending_elec_officer_id'] = officer_id
+                        session['pending_elec_officer_name'] = officer_name
+                        if send_otp(email, otp):
+                            log_audit(officer_id, 'otp_sent', ip)
+                            return redirect(url_for('verify_otp'))
+                        else:
+                            log_audit(officer_id, 'otp_failed', ip, details="Failed to send OTP")
+                            flash("Failed to send OTP", 'error')
+                            return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+                    else:
+                        log_audit(officer_id, 'failed_login_role', ip, details=f"Invalid role for {email}")
+                        flash("Invalid election officer role", 'error')
+                        return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+                else:
+                    log_audit(None, 'failed_login_password', ip, details=f"Invalid password for {email}")
+                    flash("Invalid credentials", 'error')
+                    return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+            else:
+                log_audit(None, 'failed_login_email', ip, details=f"Invalid email {email}")
+                flash("Invalid credentials", 'error')
+                return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+        except Exception as e:
+            log_audit(None, 'failed_login_error', ip, details=str(e))
+            flash(f"Error: {e}", 'error')
+            return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+        finally:
+            if conn:
+                conn.close()
+
+    return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
 
 @app.route('/')
 def index():
