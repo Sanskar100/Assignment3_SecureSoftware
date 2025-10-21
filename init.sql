@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 INSERT INTO users (name) VALUES ('Alice'), ('Bob');
 
 INSERT INTO elec_officers (name, email, password, role)
-VALUES ('John Doe', 'johndoe@example.com', '$2b$12$zAJ1/.ofZ72v8n227cZqmONgeIZ.mN/Whr/puDNsHmd3nf3HhJAam', 'elec_officer');
+VALUES ('John Doe', 'johndoe@example.com', '$2b$12$osUwZ2HLsWlR.U8ZQYXV9OHF5zrQLNRJFlKD.q0g.nBVOc5R1WYTe', 'elec_officer');
 
 INSERT INTO voters (name, email, password, status, role)
 VALUES 

@@ -4,10 +4,7 @@ import mysql.connector
 import bcrypt
 import random
 import time
-import smtplib
-from email.mime.text import MIMEText
 import re
-
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')
@@ -16,15 +13,11 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 
-# Database and SMTP configurations
+# Database configurations
 DB_HOST = os.getenv('DB_HOST', 'db')
 DB_USER = os.getenv('DB_USER', 'user')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'password')
 DB_NAME = os.getenv('DB_NAME', 'mydatabase')
-SMTP_SERVER = 'smtp.example.com'
-SMTP_PORT = 587
-SMTP_USER = 'your_email@example.com'
-SMTP_PASSWORD = 'your_password'
 BLACKLISTED_IPS = []
 RATE_LIMIT_WINDOW = 60
 RATE_LIMIT_MAX = 5
@@ -72,46 +65,7 @@ ELEC_OFFICER_LOGIN_TEMPLATE = """
 </body>
 </html>
 """
-ELEC_OFFICER_OTP_TEMPLATE="""
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>OTP Verification</title>
-    <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f0f8ff; color: #333; }
-        .container { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { color: #28a745; }
-        form { padding: 15px; border: 1px solid #ccf; border-radius: 5px; background-color: #f7fcff; }
-        form input[type="text"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        form input[type="submit"] { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        form input[type="submit"]:hover { background-color: #218838; }
-        .message { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
-        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
-    </style>
-</head>
-<body>
-    div class="container">
-        <h1>Election Officer OTP Verification</h1>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-            <div class="{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-        {% endwith %}
-        <form method="POST" action="/verify_otp">
-            <label for="otp">Enter OTP:</label><br>
-            <input type="text" id="otp" name="otp" required><br><br>
-            <input type="submit" value="Verify">
-        </form>
-    </div>
-</body>
-</html>
-"""
 
-# HTML templates for rendering
 VOTERS_TEMPLATE = """
 <!doctype html>
 <html lang="en">
@@ -195,7 +149,6 @@ VOTERS_TEMPLATE = """
         {% else %}
         <p>No voters registered yet. Add one below</p>
         {% endif %}
-
         <h2>Register New Voter</h2>
         <form method="POST" action="/add">
             <label for="name">Name:</label><br>
@@ -285,21 +238,6 @@ def generate_captcha():
     answer = num1 + num2 if operation == '+' else num1 - num2
     return question, str(answer)
 
-def send_otp(email, otp):
-    msg = MIMEText(f"Your Election Officer OTP is {otp}")
-    msg['Subject'] = 'Election Officer Login OTP'
-    msg['From'] = SMTP_USER
-    msg['To'] = email
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.sendmail(SMTP_USER, email, msg.as_string())
-        server.quit()
-        return True
-    except Exception as e:
-        print(f"Error sending OTP: {e}")
-        return False
 def log_audit(user_id, action, ip, details=''):
     conn = None
     try:
@@ -312,6 +250,7 @@ def log_audit(user_id, action, ip, details=''):
     finally:
         if conn:
             conn.close()
+
 def is_ip_blacklisted(ip):
     return ip in BLACKLISTED_IPS
 
@@ -337,92 +276,70 @@ def elec_officer_login():
         flash("Access denied due to rate limit or blacklist", 'error')
         return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question="")
     
-    captcha_question, captcha_answer = generate_captcha()
     if request.method == 'POST':
         email = request.form['email'].strip()
         password = request.form['password']
         captcha_response = request.form['captcha']
-
+        captcha_answer = session.get('captcha_answer')  # Retrieve from session
+        
+        print(f"DEBUG: CAPTCHA response={captcha_response}, answer={captcha_answer}")  # Debug log
+        
         if captcha_response != captcha_answer:
             flash("CAPTCHA incorrect. Please try again.", 'error')
             log_audit(None, 'failed_login', ip, details="Incorrect CAPTCHA")
+            captcha_question, captcha_answer = generate_captcha()
+            session['captcha_answer'] = captcha_answer  # Store new answer
             return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
 
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, password FROM elec_officers WHERE email = %s", (email,))
+            cursor.execute("SELECT id, name, password, role FROM elec_officers WHERE email = %s", (email,))
             officer = cursor.fetchone()
             if officer:
                 officer_id, officer_name, hashed_password, role = officer
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     if role == 'elec_officer':
-                        otp = str(random.randint(100000, 999999))
-                        session['otp'] = otp
-                        session['otp_expiry'] = time.time() + 300  # 5 minutes
-                        session['pending_elec_officer_id'] = officer_id
-                        session['pending_elec_officer_name'] = officer_name
-                        if send_otp(email, otp):
-                            log_audit(officer_id, 'otp_sent', ip)
-                            return redirect(url_for('verify_otp'))
-                        else:
-                            log_audit(officer_id, 'otp_failed', ip, details="Failed to send OTP")
-                            flash("Failed to send OTP", 'error')
-                            return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+                        session['elec_officer_id'] = officer_id
+                        session['elec_officer_name'] = officer_name
+                        log_audit(officer_id, 'login_success', ip)
+                        flash("Login successful", 'message')
+                        return redirect(url_for('index'))
                     else:
                         log_audit(officer_id, 'failed_login_role', ip, details=f"Invalid role for {email}")
                         flash("Invalid election officer role", 'error')
+                        captcha_question, captcha_answer = generate_captcha()
+                        session['captcha_answer'] = captcha_answer
                         return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
                 else:
                     log_audit(None, 'failed_login_password', ip, details=f"Invalid password for {email}")
                     flash("Invalid credentials", 'error')
+                    captcha_question, captcha_answer = generate_captcha()
+                    session['captcha_answer'] = captcha_answer
                     return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
             else:
                 log_audit(None, 'failed_login_email', ip, details=f"Invalid email {email}")
                 flash("Invalid credentials", 'error')
+                captcha_question, captcha_answer = generate_captcha()
+                session['captcha_answer'] = captcha_answer
                 return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
         except Exception as e:
             log_audit(None, 'failed_login_error', ip, details=str(e))
             flash(f"Error: {e}", 'error')
+            captcha_question, captcha_answer = generate_captcha()
+            session['captcha_answer'] = captcha_answer
             return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
         finally:
             if conn:
                 conn.close()
-
-    return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
-
-@app.route('/verify_otp', methods=['GET', 'POST'])
-def verify_otp():
-    if 'pending_elec_officer_id' not in session:
-        flash("No pending login found", 'error')
-        return redirect(url_for('elec_officer_login'))
-    
-    if request.method == 'POST':
-        otp = request.form['otp']
-        if time.time() > session.get('otp_expiry', 0):
-            log_audit(session['pending_elec_officer_id'], 'otp_expired', request.remote_addr)
-            flash("OTP expired", 'error')
-            session.clear()
-            return redirect(url_for('elec_officer_login'))
-        
-        if otp == session['otp']:
-            session['elec_officer_id'] = session.pop('pending_elec_officer_id')
-            session['elec_officer_name'] = session.pop('pending_elec_officer_name')
-            session.pop('otp')
-            session.pop('otp_expiry')
-            log_audit(session['elec_officer_id'], 'login_success', request.remote_addr)
-            flash("Login successful", 'message')
-            return redirect(url_for('index'))
-        else:
-            log_audit(session['pending_elec_officer_id'], 'failed_otp', request.remote_addr)
-            flash("Invalid OTP", 'error')
-            return render_template_string(ELEC_OFFICER_OTP_TEMPLATE)
-
-    return render_template_string(ELEC_OFFICER_OTP_TEMPLATE)
-
+    else:
+        captcha_question, captcha_answer = generate_captcha()
+        session['captcha_answer'] = captcha_answer  # Store answer in session
+        return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
 
 @app.route('/')
+@require_elec_officer_login
 def index():
     conn = None
     try:
