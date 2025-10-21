@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.9"
 
 services:
   candidates_web:
@@ -11,7 +11,8 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-password}
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   voters_web:
     build: ./my-flask-app/voters_app
@@ -23,31 +24,42 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-password}
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
     depends_on:
-      - db
-  voting_web: # New service for the voting app
+      db:
+        condition: service_healthy
+
+  voting_web:
     build: ./my-flask-app/voting_app
     ports:
-      - "2000:2000" # Map host port 5000 to container port 5000
+      - "2000:2000"
     environment:
       DB_HOST: db
       DB_USER: ${MYSQL_USER:-user}
       DB_PASSWORD: ${MYSQL_PASSWORD:-password}
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
-      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-a_default_secret_key} # Use a strong key in .env for production
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-a_default_secret_key}
     depends_on:
-      - db
-      - candidates_web # Depends on candidates_web for candidate data
-      - voters_web     # Depends on voters_web for voter data
+      db:
+        condition: service_healthy
 
   db:
     image: mysql:8.0
+    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-mydatabase}
       MYSQL_USER: ${MYSQL_USER:-user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+    ports:
+      - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uuser", "-ppassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
 volumes:
   db_data:
