@@ -81,7 +81,8 @@ VOTERS_TEMPLATE = """
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #e6ffe6; }
         form { margin-top: 20px; padding: 15px; border: 1px solid #ccf; border-radius: 5px; background-color: #f7fcff; }
-        form input[type="text"], form input[type="email"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form input[type="text"], form input[type="email"], form input[type="number"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
         form input[type="submit"] { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         form input[type="submit"]:hover { background-color: #218838; }
         .action-buttons { display: flex; gap: 5px; }
@@ -113,11 +114,19 @@ VOTERS_TEMPLATE = """
             <input type="text" id="name" name="name" value="{{ edit_voter[1] }}" required><br><br>
             <label for="email">Email:</label><br>
             <input type="email" id="email" name="email" value="{{ edit_voter[2] }}" required><br><br>
+            <label for="age">Age:</label><br>
+            <input type="number" id="age" name="age" value="{{ edit_voter[3] }}" required min="18"><br><br>
+            <label for="sex">Sex:</label><br>
+            <select id="sex" name="sex" required>
+                <option value="Male" {% if edit_voter[4] == 'Male' %}selected{% endif %}>Male</option>
+                <option value="Female" {% if edit_voter[4] == 'Female' %}selected{% endif %}>Female</option>
+                <option value="Other" {% if edit_voter[4] == 'Other' %}selected{% endif %}>Other</option>
+            </select><br><br>
             <label for="status">Status:</label><br>
             <select id="status" name="status" required>
-                <option value="submitted" {% if edit_voter[3] == 'submitted' %}selected{% endif %}>Submitted</option>
-                <option value="accepted" {% if edit_voter[3] == 'accepted' %}selected{% endif %}>Accepted</option>
-                <option value="rejected" {% if edit_voter[3] == 'rejected' %}selected{% endif %}>Rejected</option>
+                <option value="submitted" {% if edit_voter[5] == 'submitted' %}selected{% endif %}>Submitted</option>
+                <option value="accepted" {% if edit_voter[5] == 'accepted' %}selected{% endif %}>Accepted</option>
+                <option value="rejected" {% if edit_voter[5] == 'rejected' %}selected{% endif %}>Rejected</option>
             </select><br><br>
             <input type="submit" value="Update Voter">
             <a href="/" style="margin-left: 10px;">Cancel</a>
@@ -131,6 +140,8 @@ VOTERS_TEMPLATE = """
                     <th>ID</th>
                     <th>Name</th>
                     <th>Email</th>
+                    <th>Age</th>
+                    <th>Sex</th>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -142,8 +153,10 @@ VOTERS_TEMPLATE = """
                     <td>{{ voter[1] }}</td>
                     <td>{{ voter[2] }}</td>
                     <td>{{ voter[3] }}</td>
+                    <td>{{ voter[4] }}</td>
+                    <td>{{ voter[5] }}</td>
                     <td class="action-buttons">
-                        {% if voter[3] == 'submitted' %}
+                        {% if voter[5] == 'submitted' %}
                         <form class="delete-form" method="POST" action="/approve/{{ voter[0] }}">
                             <input type="submit" value="Approve" class="approve-button">
                         </form>
@@ -199,6 +212,13 @@ def init_db():
                 status ENUM('submitted', 'accepted', 'rejected') DEFAULT 'submitted'
             );
         """)
+        # Add age and sex if not exist
+        cursor.execute("SHOW COLUMNS FROM voters LIKE 'age'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE voters ADD COLUMN age INT NOT NULL DEFAULT 18")
+        cursor.execute("SHOW COLUMNS FROM voters LIKE 'sex'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE voters ADD COLUMN sex ENUM('Male', 'Female', 'Other') NOT NULL DEFAULT 'Other'")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -350,7 +370,7 @@ def index():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, email, status FROM voters ORDER BY FIELD(status, 'submitted', 'accepted', 'rejected'), id")
+        cursor.execute("SELECT id, name, email, age, sex, status FROM voters ORDER BY FIELD(status, 'submitted', 'accepted', 'rejected'), id")
         voters = cursor.fetchall()
         log_audit(session['elec_officer_id'], 'view_voters', request.remote_addr)
         return render_template_string(VOTERS_TEMPLATE, voters=voters, message="Welcome to the Voter Registration App!")
@@ -373,14 +393,16 @@ def edit_voter(voter_id):
         if request.method == 'POST':
             name = request.form['name']
             email = request.form['email']
+            age = request.form['age']
+            sex = request.form['sex']
             status = request.form['status']
-            cursor.execute("UPDATE voters SET name = %s, email = %s, status = %s WHERE id = %s", (name, email, status, voter_id))
+            cursor.execute("UPDATE voters SET name = %s, email = %s, age = %s, sex = %s, status = %s WHERE id = %s", (name, email, age, sex, status, voter_id))
             conn.commit()
             log_audit(session['elec_officer_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}")
             flash("Voter updated successfully", 'message')
             return redirect(url_for('index'))
         else: # GET request to show edit form
-            cursor.execute("SELECT id, name, email, status FROM voters WHERE id = %s", (voter_id,))
+            cursor.execute("SELECT id, name, email, age, sex, status FROM voters WHERE id = %s", (voter_id,))
             voter = cursor.fetchone()
             if voter:
                 log_audit(session['elec_officer_id'], 'view_edit_voter', request.remote_addr, details=f"Viewing edit form for voter ID {voter_id}")
