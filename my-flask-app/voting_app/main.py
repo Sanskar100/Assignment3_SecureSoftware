@@ -33,11 +33,12 @@ Register_Voter = """
         .container { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         h1 { color: #28a745; }
         form { padding: 15px; border: 1px solid #ccf; border-radius: 5px; background-color: #f7fcff; }
-        form input[type="text"], form input[type="email"], form input[type="password"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form input[type="text"], form input[type="email"], form input[type="password"], form input[type="number"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
         form input[type="submit"] { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         form input[type="submit"]:hover { background-color: #218838; }
         .message { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
         .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .link { margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
@@ -56,12 +57,23 @@ Register_Voter = """
             <input type="text" id="name" name="name" required><br><br>
             <label for="email">Email:</label><br>
             <input type="email" id="email" name="email" required><br><br>
+            <label for="age">Age:</label><br>
+            <input type="number" id="age" name="age" required min="18"><br><br>
+            <label for="sex">Sex:</label><br>
+            <select id="sex" name="sex" required>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+            </select><br><br>
             <label for="password">Password:</label><br>
             <input type="password" id="password" name="password" required><br><br>
-            <label for="captcha">CAPTCHA: {{ captcha_question }}</label><br>
+            <label for="captcha">CAPTCHA: {{ captcha_question }} (include '-' if negative, no spaces)</label><br>
             <input type="text" id="captcha" name="captcha" required><br><br>
             <input type="submit" value="Register">
         </form>
+        <div class="link">
+            <a href="/login">Already a Voter? Login Now</a>
+        </div>
     </div>
 </body>
 </html>
@@ -85,6 +97,7 @@ Login_Voter = """
         form input[type="submit"]:hover { background-color: #218838; }
         .message { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
         .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .link { margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
@@ -103,10 +116,13 @@ Login_Voter = """
             <input type="email" id="email" name="email" required><br><br>
             <label for="password">Password:</label><br>
             <input type="password" id="password" name="password" required><br><br>
-            <label for="captcha">CAPTCHA: {{ captcha_question }}</label><br>
+            <label for="captcha">CAPTCHA: {{ captcha_question }} (include '-' if negative, no spaces)</label><br>
             <input type="text" id="captcha" name="captcha" required><br><br>
             <input type="submit" value="Login">
         </form>
+        <div class="link">
+            <a href="/register">New Voter? Register Now</a>
+        </div>
     </div>
 </body>
 </html>
@@ -219,6 +235,13 @@ def init_db():
                 role ENUM('voter') DEFAULT 'voter'
             );
         """)
+        # Add age and sex columns if not exist
+        cursor.execute("SHOW COLUMNS FROM voters LIKE 'age'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE voters ADD COLUMN age INT NOT NULL")
+        cursor.execute("SHOW COLUMNS FROM voters LIKE 'sex'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE voters ADD COLUMN sex ENUM('Male', 'Female', 'Other') NOT NULL")
         # Create votes table if not exists
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS votes (
@@ -275,10 +298,12 @@ def captcha_generation():
     operation = random.choice(['+', '-', '*'])
     if operation == '+':
         answer = num1 + num2
-    elif operation == '-':
-        answer = num1 - num2
-    else:
+    elif operation == '*':
         answer = num1 * num2
+    else:  # For '-', ensure non-negative by swapping if needed
+        if num1 < num2:
+            num1, num2 = num2, num1  # Swap to make num1 >= num2
+        answer = num1 - num2
     question = f"What is {num1} {operation} {num2}?"
     return question, answer
 
@@ -328,13 +353,28 @@ def register():
     if request.method == 'POST':
         name = request.form['name']
         email = request.form['email']
+        age = request.form['age']
+        sex = request.form['sex']
         password = request.form['password']
-        captcha_response = request.form['captcha']
+        captcha_response = request.form['captcha'].strip()  # Added strip()
         captcha_answer = session.get('captcha_answer')
+
+        print(f"Register attempt: email={email}, captcha_response='{captcha_response}', captcha_answer={captcha_answer}")  # Added debug print
 
         if not captcha_answer or str(captcha_response) != str(captcha_answer):
             flash("CAPTCHA answer is incorrect. Please try again.", 'error')
             print(f"Register failed for {email}: CAPTCHA incorrect")
+            return redirect(url_for('register'))
+
+        try:
+            age_int = int(age)
+            if age_int < 18:
+                flash("You must be at least 18 years old to register.", 'error')
+                print(f"Register failed for {email}: Underage")
+                return redirect(url_for('register'))
+        except ValueError:
+            flash("Invalid age provided.", 'error')
+            print(f"Register failed for {email}: Invalid age")
             return redirect(url_for('register'))
 
         password_check = password_validation(password)
@@ -355,7 +395,7 @@ def register():
                 print(f"Register failed for {email}: Email already registered")
                 return redirect(url_for('register'))
 
-            cursor.execute("INSERT INTO voters (name, email, password) VALUES (%s, %s, %s)", (name, email, hashed_password))
+            cursor.execute("INSERT INTO voters (name, email, age, sex, password) VALUES (%s, %s, %s, %s, %s)", (name, email, age_int, sex, hashed_password))
             conn.commit()
             flash("Registration successful! You can now log in.", 'success')
             print(f"Registration successful for {email}")
@@ -380,20 +420,20 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        captcha_response = request.form['captcha']
+        captcha_response = request.form['captcha'].strip()  # Added strip()
         captcha_answer = session.get('captcha_answer')
         ip_address = request.remote_addr
-        print(f"Login attempt: email={email}, captcha_response={captcha_response}, captcha_answer={captcha_answer}")
+        print(f"Login attempt: email={email}, captcha_response='{captcha_response}', captcha_answer={captcha_answer}")
 
         if not rate_limitcheck(ip_address):
             flash("Too many login attempts. Please try again later.", 'error')
             print(f"Login failed for {email}: Rate limit triggered")
             return redirect(url_for('login'))
 
-        # if not captcha_answer or str(captcha_response) != str(captcha_answer):
-        #     flash("CAPTCHA answer is incorrect. Please try again.", 'error')
-        #     print(f"Login failed for {email}: CAPTCHA incorrect")
-        #     return redirect(url_for('login'))
+        if not captcha_answer or str(captcha_response) != str(captcha_answer):
+            flash("CAPTCHA answer is incorrect. Please try again.", 'error')
+            print(f"Login failed for {email}: CAPTCHA incorrect")
+            return redirect(url_for('login'))
 
         conn = None
         try:

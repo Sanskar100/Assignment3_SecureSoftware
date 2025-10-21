@@ -90,6 +90,8 @@ VOTERS_TEMPLATE = """
         .delete-form { display: inline; }
         .delete-button { background-color: #dc3545; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
         .delete-button:hover { background-color: #c82333; }
+        .approve-button { background-color: #28a745; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .approve-button:hover { background-color: #218838; }
         .message { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
     </style>
 </head>
@@ -111,6 +113,12 @@ VOTERS_TEMPLATE = """
             <input type="text" id="name" name="name" value="{{ edit_voter[1] }}" required><br><br>
             <label for="email">Email:</label><br>
             <input type="email" id="email" name="email" value="{{ edit_voter[2] }}" required><br><br>
+            <label for="status">Status:</label><br>
+            <select id="status" name="status" required>
+                <option value="submitted" {% if edit_voter[3] == 'submitted' %}selected{% endif %}>Submitted</option>
+                <option value="accepted" {% if edit_voter[3] == 'accepted' %}selected{% endif %}>Accepted</option>
+                <option value="rejected" {% if edit_voter[3] == 'rejected' %}selected{% endif %}>Rejected</option>
+            </select><br><br>
             <input type="submit" value="Update Voter">
             <a href="/" style="margin-left: 10px;">Cancel</a>
         </form>
@@ -135,6 +143,11 @@ VOTERS_TEMPLATE = """
                     <td>{{ voter[2] }}</td>
                     <td>{{ voter[3] }}</td>
                     <td class="action-buttons">
+                        {% if voter[3] == 'submitted' %}
+                        <form class="delete-form" method="POST" action="/approve/{{ voter[0] }}">
+                            <input type="submit" value="Approve" class="approve-button">
+                        </form>
+                        {% endif %}
                         <form class="delete-form" method="GET" action="/edit/{{ voter[0] }}">
                             <input type="submit" value="Edit" class="edit-button">
                         </form>
@@ -147,16 +160,8 @@ VOTERS_TEMPLATE = """
             </tbody>
         </table>
         {% else %}
-        <p>No voters registered yet. Add one below</p>
+        <p>No voters registered yet.</p>
         {% endif %}
-        <h2>Register New Voter</h2>
-        <form method="POST" action="/add">
-            <label for="name">Name:</label><br>
-            <input type="text" id="name" name="name" required><br><br>
-            <label for="email">Email:</label><br>
-            <input type="email" id="email" name="email" required><br><br>
-            <input type="submit" value="Register Voter">
-        </form>
         {% endif %}
     </div>
 </body>
@@ -345,7 +350,7 @@ def index():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, email, status FROM voters")
+        cursor.execute("SELECT id, name, email, status FROM voters ORDER BY FIELD(status, 'submitted', 'accepted', 'rejected'), id")
         voters = cursor.fetchall()
         log_audit(session['elec_officer_id'], 'view_voters', request.remote_addr)
         return render_template_string(VOTERS_TEMPLATE, voters=voters, message="Welcome to the Voter Registration App!")
@@ -356,27 +361,6 @@ def index():
     finally:
         if conn:
             conn.close()
-
-@app.route('/add', methods=['POST'])
-@require_elec_officer_login
-def add_voter():
-    name = request.form['name']
-    email = request.form['email']
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO voters (name, email, status) VALUES (%s, %s, 'submitted')", (name, email))
-        conn.commit()
-        log_audit(session['elec_officer_id'], 'add_voter', request.remote_addr, details=f"Added voter {name} ({email})")
-        flash("Voter added successfully", 'message')
-    except Exception as e:
-        log_audit(session['elec_officer_id'], 'add_voter_error', request.remote_addr, details=str(e))
-        flash(f"Error adding voter: {e}", 'error')
-    finally:
-        if conn:
-            conn.close()
-    return redirect(url_for('index'))
 
 @app.route('/edit/<int:voter_id>', methods=['GET', 'POST'])
 @require_elec_officer_login
@@ -389,7 +373,8 @@ def edit_voter(voter_id):
         if request.method == 'POST':
             name = request.form['name']
             email = request.form['email']
-            cursor.execute("UPDATE voters SET name = %s, email = %s WHERE id = %s", (name, email, voter_id))
+            status = request.form['status']
+            cursor.execute("UPDATE voters SET name = %s, email = %s, status = %s WHERE id = %s", (name, email, status, voter_id))
             conn.commit()
             log_audit(session['elec_officer_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}")
             flash("Voter updated successfully", 'message')
@@ -411,6 +396,25 @@ def edit_voter(voter_id):
     finally:
         if conn:
             conn.close()
+
+@app.route('/approve/<int:voter_id>', methods=['POST'])
+@require_elec_officer_login
+def approve_voter(voter_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE voters SET status = 'accepted' WHERE id = %s", (voter_id,))
+        conn.commit()
+        log_audit(session['elec_officer_id'], 'approve_voter', request.remote_addr, details=f"Approved voter ID {voter_id}")
+        flash("Voter approved successfully", 'message')
+    except Exception as e:
+        log_audit(session['elec_officer_id'], 'approve_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error approving voter: {e}", 'error')
+    finally:
+        if conn:
+            conn.close()
+    return redirect(url_for('index'))
 
 @app.route('/delete/<int:voter_id>', methods=['POST'])
 @require_elec_officer_login
