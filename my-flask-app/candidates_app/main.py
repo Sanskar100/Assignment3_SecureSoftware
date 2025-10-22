@@ -105,6 +105,7 @@ HOME_TEMPLATE = """
         <p>Welcome, {{ session['admin_name'] }}! 
            <a class="nav-link" href="/manage_voters">Manage Voters</a> |
            <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
+           <a class="nav-link" href="/audit_logs">View Audit Logs</a> |
            <a class="logout-link" href="/logout">Logout</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -227,6 +228,7 @@ VOTERS_TEMPLATE = """
         <p>Welcome, {{ session['admin_name'] }}! 
            <a class="nav-link" href="/">Manage Candidates</a> |
            <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
+           <a class="nav-link" href="/audit_logs">View Audit Logs</a> |
            <a class="logout-link" href="/logout">Logout</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -335,6 +337,7 @@ ELEC_OFFICERS_TEMPLATE = """
         <p>Welcome, {{ session['admin_name'] }}! 
            <a class="nav-link" href="/">Manage Candidates</a> |
            <a class="nav-link" href="/manage_voters">Manage Voters</a> |
+           <a class="nav-link" href="/audit_logs">View Audit Logs</a> |
            <a class="logout-link" href="/logout">Logout</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -409,6 +412,125 @@ ELEC_OFFICERS_TEMPLATE = """
             </select><br><br>
             <input type="submit" value="Add Election Officer">
         </form>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+AUDIT_LOGS_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Audit Logs</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #0056b3; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; cursor: pointer; }
+        th:hover { background-color: #e0e0e0; }
+        .message { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .logout-link, .nav-link { color: #007bff; text-decoration: none; margin-right: 10px; }
+        .logout-link:hover, .nav-link:hover { text-decoration: underline; }
+        .pagination { margin-top: 20px; }
+        .pagination a { color: #007bff; text-decoration: none; padding: 5px 10px; border: 1px solid #ddd; margin-right: 5px; border-radius: 4px; }
+        .pagination a:hover { background-color: #f2f2f2; }
+        .pagination .active { background-color: #007bff; color: white; }
+    </style>
+    <script>
+        function sortTable(n) {
+            var table, rows, switching = true, i, x, y, shouldSwitch, dir = "asc", switchcount = 0;
+            table = document.querySelector("table");
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = rows[i].getElementsByTagName("TD")[n];
+                    y = rows[i + 1].getElementsByTagName("TD")[n];
+                    if (dir == "asc") {
+                        if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    } else if (dir == "desc") {
+                        if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+                    switchcount++;
+                } else if (switchcount == 0 && dir == "asc") {
+                    dir = "desc";
+                    switching = true;
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Audit Logs</h1>
+        <p>Welcome, {{ session['admin_name'] }}! 
+           <a class="nav-link" href="/">Manage Candidates</a> |
+           <a class="nav-link" href="/manage_voters">Manage Voters</a> |
+           <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
+           <a class="logout-link" href="/logout">Logout</a></p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+        <h2>Audit Logs</h2>
+        {% if logs %}
+        <table>
+            <thead>
+                <tr>
+                    <th onclick="sortTable(0)">ID</th>
+                    <th onclick="sortTable(1)">User ID</th>
+                    <th onclick="sortTable(2)">Action</th>
+                    <th onclick="sortTable(3)">Details</th>
+                    <th onclick="sortTable(4)">IP Address</th>
+                    <th onclick="sortTable(5)">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log[0] }}</td>
+                    <td>{{ log[1] or 'N/A' }}</td>
+                    <td>{{ log[2] }}</td>
+                    <td>{{ log[3] or 'N/A' }}</td>
+                    <td>{{ log[4] }}</td>
+                    <td>{{ log[5] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="pagination">
+            {% if page > 1 %}
+            <a href="/audit_logs?page={{ page - 1 }}">Previous</a>
+            {% endif %}
+            {% for p in range(1, total_pages + 1) %}
+            <a href="/audit_logs?page={{ p }}" class="{% if p == page %}active{% endif %}">{{ p }}</a>
+            {% endfor %}
+            {% if page < total_pages %}
+            <a href="/audit_logs?page={{ page + 1 }}">Next</a>
+            {% endif %}
+        </div>
+        {% else %}
+        <p>No audit logs found.</p>
         {% endif %}
     </div>
 </body>
@@ -707,14 +829,14 @@ def edit_candidate(candidate_id):
             cursor.execute("UPDATE candidates SET name = %s, sex = %s, age = %s, political_party = %s WHERE id = %s",
                            (name, sex, age, party, candidate_id))
             conn.commit()
-            log_audit(session['admin_id'], 'edit_candidate', request.remote_addr, details=f"Edited candidate ID {candidate_id}")
+            log_audit(session['admin_id'], 'edit_candidate', request.remote_addr, details=f"Edited candidate ID {candidate_id}: {name}")
             flash("Candidate updated successfully", 'message')
             return redirect(url_for('index'))
         else:  # GET request to show edit form
             cursor.execute("SELECT id, name, sex, age, political_party FROM candidates WHERE id = %s", (candidate_id,))
             candidate = cursor.fetchone()
             if candidate:
-                log_audit(session['admin_id'], 'view_edit_candidate', request.remote_addr, details=f"Viewing edit form for candidate ID {candidate_id}")
+                log_audit(session['admin_id'], 'view_edit_candidate', request.remote_addr, details=f"Viewing edit form for candidate ID {candidate_id}: {candidate[1]}")
                 return render_template_string(HOME_TEMPLATE, edit_candidate=candidate, candidates=[])
             else:
                 log_audit(session['admin_id'], 'view_edit_candidate_error', request.remote_addr, details=f"Candidate ID {candidate_id} not found")
@@ -811,14 +933,14 @@ def edit_voter(voter_id):
                 cursor.execute("UPDATE voters SET name = %s, email = %s, status = %s, role = %s WHERE id = %s",
                                (name, email, status, role, voter_id))
             conn.commit()
-            log_audit(session['admin_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}")
+            log_audit(session['admin_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}: {name}")
             flash("Voter updated successfully", 'message')
             return redirect(url_for('manage_voters'))
         else:  # GET request to show edit form
             cursor.execute("SELECT id, name, email, password, status, role FROM voters WHERE id = %s", (voter_id,))
             voter = cursor.fetchone()
             if voter:
-                log_audit(session['admin_id'], 'view_edit_voter', request.remote_addr, details=f"Viewing edit form for voter ID {voter_id}")
+                log_audit(session['admin_id'], 'view_edit_voter', request.remote_addr, details=f"Viewing edit form for voter ID {voter_id}: {voter[1]}")
                 return render_template_string(VOTERS_TEMPLATE, edit_voter=voter, voters=[])
             else:
                 log_audit(session['admin_id'], 'view_edit_voter_error', request.remote_addr, details=f"Voter ID {voter_id} not found")
@@ -951,14 +1073,14 @@ def edit_elec_officer(officer_id):
                 cursor.execute("UPDATE elec_officers SET name = %s, email = %s, role = %s WHERE id = %s",
                                (name, email, role, officer_id))
             conn.commit()
-            log_audit(session['admin_id'], 'edit_elec_officer', request.remote_addr, details=f"Edited election officer ID {officer_id}")
+            log_audit(session['admin_id'], 'edit_elec_officer', request.remote_addr, details=f"Edited election officer ID {officer_id}: {name}")
             flash("Election officer updated successfully", 'message')
             return redirect(url_for('manage_elec_officers'))
         else:  # GET request to show edit form
             cursor.execute("SELECT id, name, email, password, role FROM elec_officers WHERE id = %s", (officer_id,))
             officer = cursor.fetchone()
             if officer:
-                log_audit(session['admin_id'], 'view_edit_elec_officer', request.remote_addr, details=f"Viewing edit form for election officer ID {officer_id}")
+                log_audit(session['admin_id'], 'view_edit_elec_officer', request.remote_addr, details=f"Viewing edit form for election officer ID {officer_id}: {officer[1]}")
                 return render_template_string(ELEC_OFFICERS_TEMPLATE, edit_officer=officer, officers=[])
             else:
                 log_audit(session['admin_id'], 'view_edit_elec_officer_error', request.remote_addr, details=f"Election officer ID {officer_id} not found")
@@ -995,6 +1117,34 @@ def delete_elec_officer(officer_id):
         if conn:
             conn.close()
     return redirect(url_for('manage_elec_officers'))
+
+@app.route('/audit_logs')
+@require_admin_login
+def audit_logs():
+    page = request.args.get('page', 1, type=int)
+    per_page = 10  # Number of logs per page
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Count total logs for pagination
+        cursor.execute("SELECT COUNT(*) FROM audit_logs")
+        total_logs = cursor.fetchone()[0]
+        total_pages = (total_logs + per_page - 1) // per_page
+
+        # Fetch logs for the current page
+        offset = (page - 1) * per_page
+        cursor.execute("SELECT id, user_id, action, details, ip_address, timestamp FROM audit_logs ORDER BY timestamp DESC LIMIT %s OFFSET %s", (per_page, offset))
+        logs = cursor.fetchall()
+        log_audit(session['admin_id'], 'view_audit_logs', request.remote_addr)
+        return render_template_string(AUDIT_LOGS_TEMPLATE, logs=logs, page=page, total_pages=total_pages)
+    except Exception as e:
+        log_audit(session['admin_id'], 'view_audit_logs_error', request.remote_addr, details=str(e))
+        flash(f"Error loading audit logs: {e}", 'error')
+        return render_template_string(AUDIT_LOGS_TEMPLATE, logs=[], page=page, total_pages=1)
+    finally:
+        if conn:
+            conn.close()
 
 @app.route('/logout')
 def logout():
