@@ -556,6 +556,7 @@ AUDIT_LOGS_TEMPLATE = """
 </html>
 """
 
+#Database utilities
 def get_db_connection():
     return mysql.connector.connect(
         host=DB_HOST,
