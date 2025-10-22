@@ -11,7 +11,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')
 app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['PERMANENT_SESSION_LIFETIME'] = 3600  
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1-hour session timeout
 
 # Database configurations
 DB_HOST = os.getenv('DB_HOST', 'db')
@@ -87,19 +87,25 @@ HOME_TEMPLATE = """
         form input[type="text"], form input[type="number"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
         form input[type="submit"] { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         form input[type="submit"]:hover { background-color: #0056b3; }
+        .action-buttons { display: flex; gap: 5px; }
+        .edit-button { background-color: #ffc107; color: #212529; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .edit-button:hover { background-color: #e0a800; }
         .delete-form { display: inline; }
         .delete-button { background-color: #dc3545; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
         .delete-button:hover { background-color: #c82333; }
         .message { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
         .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
-        .logout-link { color: #007bff; text-decoration: none; }
-        .logout-link:hover { text-decoration: underline; }
+        .logout-link, .nav-link { color: #007bff; text-decoration: none; margin-right: 10px; }
+        .logout-link:hover, .nav-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Candidate Management Application</h1>
-        <p>Welcome, {{ session['admin_name'] }}! <a class="logout-link" href="/logout">Logout</a></p>
+        <p>Welcome, {{ session['admin_name'] }}! 
+           <a class="nav-link" href="/manage_voters">Manage Voters</a> |
+           <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
+           <a class="logout-link" href="/logout">Logout</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
@@ -107,6 +113,25 @@ HOME_TEMPLATE = """
             {% endfor %}
         {% endif %}
         {% endwith %}
+        {% if edit_candidate %}
+        <h2>Edit Candidate (ID: {{ edit_candidate[0] }})</h2>
+        <form method="POST" action="/edit/{{ edit_candidate[0] }}">
+            <label for="name">Name:</label><br>
+            <input type="text" id="name" name="name" value="{{ edit_candidate[1] }}" required><br><br>
+            <label for="sex">Sex:</label><br>
+            <select id="sex" name="sex" required>
+                <option value="Male" {% if edit_candidate[2] == 'Male' %}selected{% endif %}>Male</option>
+                <option value="Female" {% if edit_candidate[2] == 'Female' %}selected{% endif %}>Female</option>
+                <option value="Other" {% if edit_candidate[2] == 'Other' %}selected{% endif %}>Other</option>
+            </select><br><br>
+            <label for="age">Age:</label><br>
+            <input type="number" id="age" name="age" value="{{ edit_candidate[3] }}" required min="18"><br><br>
+            <label for="party">Political Party:</label><br>
+            <input type="text" id="party" name="party" value="{{ edit_candidate[4] }}" required><br><br>
+            <input type="submit" value="Update Candidate">
+            <a href="/" style="margin-left: 10px;">Cancel</a>
+        </form>
+        {% else %}
         <h2>Current Candidates</h2>
         {% if candidates %}
         <table>
@@ -128,7 +153,10 @@ HOME_TEMPLATE = """
                     <td>{{ candidate[2] }}</td>
                     <td>{{ candidate[3] }}</td>
                     <td>{{ candidate[4] }}</td>
-                    <td>
+                    <td class="action-buttons">
+                        <form class="delete-form" method="GET" action="/edit/{{ candidate[0] }}">
+                            <input type="submit" value="Edit" class="edit-button">
+                        </form>
                         <form class="delete-form" method="POST" action="/delete/{{ candidate[0] }}">
                             <input type="submit" value="Delete" class="delete-button">
                         </form>
@@ -157,6 +185,231 @@ HOME_TEMPLATE = """
             <input type="text" id="party" name="party" required><br><br>
             <input type="submit" value="Add Candidate">
         </form>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+VOTERS_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Voter Management</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2 { color: #0056b3; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        form { margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 5px; background-color: #fafafa; }
+        form input[type="text"], form input[type="email"], form input[type="password"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form input[type="submit"] { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        form input[type="submit"]:hover { background-color: #0056b3; }
+        .action-buttons { display: flex; gap: 5px; }
+        .edit-button { background-color: #ffc107; color: #212529; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .edit-button:hover { background-color: #e0a800; }
+        .delete-form { display: inline; }
+        .delete-button { background-color: #dc3545; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .delete-button:hover { background-color: #c82333; }
+        .message { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .logout-link, .nav-link { color: #007bff; text-decoration: none; margin-right: 10px; }
+        .logout-link:hover, .nav-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Voter Management</h1>
+        <p>Welcome, {{ session['admin_name'] }}! 
+           <a class="nav-link" href="/">Manage Candidates</a> |
+           <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
+           <a class="logout-link" href="/logout">Logout</a></p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+        {% if edit_voter %}
+        <h2>Edit Voter (ID: {{ edit_voter[0] }})</h2>
+        <form method="POST" action="/edit_voter/{{ edit_voter[0] }}">
+            <label for="name">Name:</label><br>
+            <input type="text" id="name" name="name" value="{{ edit_voter[1] }}" required><br><br>
+            <label for="email">Email:</label><br>
+            <input type="email" id="email" name="email" value="{{ edit_voter[2] }}" required><br><br>
+            <label for="password">Password (leave blank to keep unchanged):</label><br>
+            <input type="password" id="password" name="password"><br><br>
+            <label for="status">Status:</label><br>
+            <select id="status" name="status" required>
+                <option value="submitted" {% if edit_voter[4] == 'submitted' %}selected{% endif %}>Submitted</option>
+                <option value="accepted" {% if edit_voter[4] == 'accepted' %}selected{% endif %}>Accepted</option>
+            </select><br><br>
+            <label for="role">Role:</label><br>
+            <select id="role" name="role" required>
+                <option value="voter" {% if edit_voter[5] == 'voter' %}selected{% endif %}>Voter</option>
+            </select><br><br>
+            <input type="submit" value="Update Voter">
+            <a href="/manage_voters" style="margin-left: 10px;">Cancel</a>
+        </form>
+        {% else %}
+        <h2>Current Voters</h2>
+        {% if voters %}
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Role</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for voter in voters %}
+                <tr>
+                    <td>{{ voter[0] }}</td>
+                    <td>{{ voter[1] }}</td>
+                    <td>{{ voter[2] }}</td>
+                    <td>{{ voter[4] }}</td>
+                    <td>{{ voter[5] }}</td>
+                    <td class="action-buttons">
+                        <form class="delete-form" method="GET" action="/edit_voter/{{ voter[0] }}">
+                            <input type="submit" value="Edit" class="edit-button">
+                        </form>
+                        <form class="delete-form" method="POST" action="/delete_voter/{{ voter[0] }}">
+                            <input type="submit" value="Delete" class="delete-button">
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No voters found.</p>
+        {% endif %}
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+ELEC_OFFICERS_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Election Officer Management</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2 { color: #0056b3; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        form { margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 5px; background-color: #fafafa; }
+        form input[type="text"], form input[type="email"], form input[type="password"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form input[type="submit"] { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        form input[type="submit"]:hover { background-color: #0056b3; }
+        .action-buttons { display: flex; gap: 5px; }
+        .edit-button { background-color: #ffc107; color: #212529; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .edit-button:hover { background-color: #e0a800; }
+        .delete-form { display: inline; }
+        .delete-button { background-color: #dc3545; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .delete-button:hover { background-color: #c82333; }
+        .message { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .logout-link, .nav-link { color: #007bff; text-decoration: none; margin-right: 10px; }
+        .logout-link:hover, .nav-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Election Officer Management</h1>
+        <p>Welcome, {{ session['admin_name'] }}! 
+           <a class="nav-link" href="/">Manage Candidates</a> |
+           <a class="nav-link" href="/manage_voters">Manage Voters</a> |
+           <a class="logout-link" href="/logout">Logout</a></p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+        {% if edit_officer %}
+        <h2>Edit Election Officer (ID: {{ edit_officer[0] }})</h2>
+        <form method="POST" action="/edit_elec_officer/{{ edit_officer[0] }}">
+            <label for="name">Name:</label><br>
+            <input type="text" id="name" name="name" value="{{ edit_officer[1] }}" required><br><br>
+            <label for="email">Email:</label><br>
+            <input type="email" id="email" name="email" value="{{ edit_officer[2] }}" required><br><br>
+            <label for="password">Password (leave blank to keep unchanged):</label><br>
+            <input type="password" id="password" name="password"><br><br>
+            <label for="role">Role:</label><br>
+            <select id="role" name="role" required>
+                <option value="elec_officer" {% if edit_officer[4] == 'elec_officer' %}selected{% endif %}>Election Officer</option>
+            </select><br><br>
+            <input type="submit" value="Update Election Officer">
+            <a href="/manage_elec_officers" style="margin-left: 10px;">Cancel</a>
+        </form>
+        {% else %}
+        <h2>Current Election Officers</h2>
+        {% if officers %}
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for officer in officers %}
+                <tr>
+                    <td>{{ officer[0] }}</td>
+                    <td>{{ officer[1] }}</td>
+                    <td>{{ officer[2] }}</td>
+                    <td>{{ officer[4] }}</td>
+                    <td class="action-buttons">
+                        <form class="delete-form" method="GET" action="/edit_elec_officer/{{ officer[0] }}">
+                            <input type="submit" value="Edit" class="edit-button">
+                        </form>
+                        <form class="delete-form" method="POST" action="/delete_elec_officer/{{ officer[0] }}">
+                            <input type="submit" value="Delete" class="delete-button">
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No election officers found. Add one below!</p>
+        {% endif %}
+
+        <h2>Add New Election Officer</h2>
+        <form method="POST" action="/add_elec_officer">
+            <label for="name">Name:</label><br>
+            <input type="text" id="name" name="name" required><br><br>
+            <label for="email">Email:</label><br>
+            <input type="email" id="email" name="email" required><br><br>
+            <label for="password">Password:</label><br>
+            <input type="password" id="password" name="password" required><br><br>
+            <label for="role">Role:</label><br>
+            <select id="role" name="role" required>
+                <option value="elec_officer">Election Officer</option>
+            </select><br><br>
+            <input type="submit" value="Add Election Officer">
+        </form>
+        {% endif %}
     </div>
 </body>
 </html>
@@ -193,6 +446,27 @@ def init_db():
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password VARCHAR(255) NOT NULL,
                 role ENUM('admin') DEFAULT 'admin'
+            );
+        """)
+        # Ensure voters table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS voters (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                status ENUM('submitted', 'accepted') DEFAULT 'submitted',
+                role ENUM('voter') DEFAULT 'voter'
+            );
+        """)
+        # Ensure elec_officers table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS elec_officers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                role ENUM('elec_officer') DEFAULT 'elec_officer'
             );
         """)
         # Ensure audit_logs table
@@ -260,6 +534,14 @@ def check_rate_limit(ip):
         rate_limit_dict[ip] = (1, now)
         return True
     rate_limit_dict[ip] = (1, now)
+    return True
+
+def validate_email(email):
+    return re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email)
+
+def validate_password_strength(password):
+    if len(password) < 8 or not re.search("[A-Z]", password) or not re.search("[a-z]", password) or not re.search("\d", password) or not re.search("[!@#$%^&*]", password):
+        return False
     return True
 
 @app.before_request
@@ -390,6 +672,62 @@ def add_candidate():
             conn.close()
     return redirect(url_for('index'))
 
+@app.route('/edit/<int:candidate_id>', methods=['GET', 'POST'])
+@require_admin_login
+def edit_candidate(candidate_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if request.method == 'POST':
+            name = request.form['name'].strip()
+            sex = request.form['sex']
+            try:
+                age = int(request.form['age'])
+                if age < 18:
+                    flash("Age must be at least 18", 'error')
+                    return redirect(url_for('index'))
+            except ValueError:
+                flash("Invalid age format", 'error')
+                return redirect(url_for('index'))
+            party = request.form['party'].strip()
+
+            # Input validation
+            if not re.match(r'^[A-Za-z\s]{1,255}$', name):
+                flash("Invalid name format. Use letters and spaces only.", 'error')
+                return redirect(url_for('index'))
+            if not re.match(r'^[A-Za-z\s]{1,255}$', party):
+                flash("Invalid political party format. Use letters and spaces only.", 'error')
+                return redirect(url_for('index'))
+            if sex not in ['Male', 'Female', 'Other']:
+                flash("Invalid sex selection", 'error')
+                return redirect(url_for('index'))
+
+            cursor.execute("UPDATE candidates SET name = %s, sex = %s, age = %s, political_party = %s WHERE id = %s",
+                           (name, sex, age, party, candidate_id))
+            conn.commit()
+            log_audit(session['admin_id'], 'edit_candidate', request.remote_addr, details=f"Edited candidate ID {candidate_id}")
+            flash("Candidate updated successfully", 'message')
+            return redirect(url_for('index'))
+        else:  # GET request to show edit form
+            cursor.execute("SELECT id, name, sex, age, political_party FROM candidates WHERE id = %s", (candidate_id,))
+            candidate = cursor.fetchone()
+            if candidate:
+                log_audit(session['admin_id'], 'view_edit_candidate', request.remote_addr, details=f"Viewing edit form for candidate ID {candidate_id}")
+                return render_template_string(HOME_TEMPLATE, edit_candidate=candidate, candidates=[])
+            else:
+                log_audit(session['admin_id'], 'view_edit_candidate_error', request.remote_addr, details=f"Candidate ID {candidate_id} not found")
+                flash("Candidate not found", 'error')
+                return redirect(url_for('index'))
+    except Exception as e:
+        log_audit(session['admin_id'], 'edit_candidate_error', request.remote_addr, details=str(e))
+        flash(f"Error editing candidate: {e}", 'error')
+        return redirect(url_for('index'))
+    finally:
+        if conn:
+            conn.close()
+
 @app.route('/delete/<int:candidate_id>', methods=['POST'])
 @require_admin_login
 def delete_candidate(candidate_id):
@@ -413,6 +751,250 @@ def delete_candidate(candidate_id):
         if conn:
             conn.close()
     return redirect(url_for('index'))
+
+@app.route('/manage_voters')
+@require_admin_login
+def manage_voters():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, email, password, status, role FROM voters")
+        voters = cursor.fetchall()
+        log_audit(session['admin_id'], 'view_voters', request.remote_addr)
+        return render_template_string(VOTERS_TEMPLATE, voters=voters, message="Voter Management")
+    except Exception as e:
+        log_audit(session['admin_id'], 'view_voters_error', request.remote_addr, details=str(e))
+        flash(f"Error loading voters: {e}", 'error')
+        return render_template_string(VOTERS_TEMPLATE, voters=[], message=f"Error loading voters: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/edit_voter/<int:voter_id>', methods=['GET', 'POST'])
+@require_admin_login
+def edit_voter(voter_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if request.method == 'POST':
+            name = request.form['name'].strip()
+            email = request.form['email'].strip()
+            password = request.form['password']
+            status = request.form['status']
+            role = request.form['role']
+
+            # Input validation
+            if not re.match(r'^[A-Za-z\s]{1,255}$', name):
+                flash("Invalid name format. Use letters and spaces only.", 'error')
+                return redirect(url_for('manage_voters'))
+            if not validate_email(email):
+                flash("Invalid email format.", 'error')
+                return redirect(url_for('manage_voters'))
+            if password and not validate_password_strength(password):
+                flash("Password must be at least 8 characters long and include uppercase, lowercase, numbers, and special characters.", 'error')
+                return redirect(url_for('manage_voters'))
+            if status not in ['submitted', 'accepted']:
+                flash("Invalid status selection.", 'error')
+                return redirect(url_for('manage_voters'))
+            if role != 'voter':
+                flash("Invalid role selection.", 'error')
+                return redirect(url_for('manage_voters'))
+
+            if password:
+                hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                cursor.execute("UPDATE voters SET name = %s, email = %s, password = %s, status = %s, role = %s WHERE id = %s",
+                               (name, email, hashed_password, status, role, voter_id))
+            else:
+                cursor.execute("UPDATE voters SET name = %s, email = %s, status = %s, role = %s WHERE id = %s",
+                               (name, email, status, role, voter_id))
+            conn.commit()
+            log_audit(session['admin_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}")
+            flash("Voter updated successfully", 'message')
+            return redirect(url_for('manage_voters'))
+        else:  # GET request to show edit form
+            cursor.execute("SELECT id, name, email, password, status, role FROM voters WHERE id = %s", (voter_id,))
+            voter = cursor.fetchone()
+            if voter:
+                log_audit(session['admin_id'], 'view_edit_voter', request.remote_addr, details=f"Viewing edit form for voter ID {voter_id}")
+                return render_template_string(VOTERS_TEMPLATE, edit_voter=voter, voters=[])
+            else:
+                log_audit(session['admin_id'], 'view_edit_voter_error', request.remote_addr, details=f"Voter ID {voter_id} not found")
+                flash("Voter not found", 'error')
+                return redirect(url_for('manage_voters'))
+    except Exception as e:
+        log_audit(session['admin_id'], 'edit_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error editing voter: {e}", 'error')
+        return redirect(url_for('manage_voters'))
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/delete_voter/<int:voter_id>', methods=['POST'])
+@require_admin_login
+def delete_voter(voter_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM voters WHERE id = %s", (voter_id,))
+        voter = cursor.fetchone()
+        if voter:
+            cursor.execute("DELETE FROM voters WHERE id = %s", (voter_id,))
+            conn.commit()
+            log_audit(session['admin_id'], 'delete_voter', request.remote_addr, details=f"Deleted voter ID {voter_id}: {voter[0]}")
+            flash("Voter deleted successfully", 'message')
+        else:
+            flash("Voter not found", 'error')
+    except Exception as e:
+        log_audit(session['admin_id'], 'delete_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error deleting voter: {e}", 'error')
+    finally:
+        if conn:
+            conn.close()
+    return redirect(url_for('manage_voters'))
+
+@app.route('/manage_elec_officers')
+@require_admin_login
+def manage_elec_officers():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, email, password, role FROM elec_officers")
+        officers = cursor.fetchall()
+        log_audit(session['admin_id'], 'view_elec_officers', request.remote_addr)
+        return render_template_string(ELEC_OFFICERS_TEMPLATE, officers=officers, message="Election Officer Management")
+    except Exception as e:
+        log_audit(session['admin_id'], 'view_elec_officers_error', request.remote_addr, details=str(e))
+        flash(f"Error loading election officers: {e}", 'error')
+        return render_template_string(ELEC_OFFICERS_TEMPLATE, officers=[], message=f"Error loading election officers: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/add_elec_officer', methods=['POST'])
+@require_admin_login
+def add_elec_officer():
+    name = request.form['name'].strip()
+    email = request.form['email'].strip()
+    password = request.form['password']
+    role = request.form['role']
+
+    # Input validation
+    if not re.match(r'^[A-Za-z\s]{1,255}$', name):
+        flash("Invalid name format. Use letters and spaces only.", 'error')
+        return redirect(url_for('manage_elec_officers'))
+    if not validate_email(email):
+        flash("Invalid email format.", 'error')
+        return redirect(url_for('manage_elec_officers'))
+    if not validate_password_strength(password):
+        flash("Password must be at least 8 characters long and include uppercase, lowercase, numbers, and special characters.", 'error')
+        return redirect(url_for('manage_elec_officers'))
+    if role != 'elec_officer':
+        flash("Invalid role selection.", 'error')
+        return redirect(url_for('manage_elec_officers'))
+
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO elec_officers (name, email, password, role) VALUES (%s, %s, %s, %s)",
+                       (name, email, hashed_password, role))
+        conn.commit()
+        log_audit(session['admin_id'], 'add_elec_officer', request.remote_addr, details=f"Added election officer: {name}")
+        flash("Election officer added successfully", 'message')
+    except Exception as e:
+        log_audit(session['admin_id'], 'add_elec_officer_error', request.remote_addr, details=str(e))
+        flash(f"Error adding election officer: {e}", 'error')
+    finally:
+        if conn:
+            conn.close()
+    return redirect(url_for('manage_elec_officers'))
+
+@app.route('/edit_elec_officer/<int:officer_id>', methods=['GET', 'POST'])
+@require_admin_login
+def edit_elec_officer(officer_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if request.method == 'POST':
+            name = request.form['name'].strip()
+            email = request.form['email'].strip()
+            password = request.form['password']
+            role = request.form['role']
+
+            # Input validation
+            if not re.match(r'^[A-Za-z\s]{1,255}$', name):
+                flash("Invalid name format. Use letters and spaces only.", 'error')
+                return redirect(url_for('manage_elec_officers'))
+            if not validate_email(email):
+                flash("Invalid email format.", 'error')
+                return redirect(url_for('manage_elec_officers'))
+            if password and not validate_password_strength(password):
+                flash("Password must be at least 8 characters long and include uppercase, lowercase, numbers, and special characters.", 'error')
+                return redirect(url_for('manage_elec_officers'))
+            if role != 'elec_officer':
+                flash("Invalid role selection.", 'error')
+                return redirect(url_for('manage_elec_officers'))
+
+            if password:
+                hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                cursor.execute("UPDATE elec_officers SET name = %s, email = %s, password = %s, role = %s WHERE id = %s",
+                               (name, email, hashed_password, role, officer_id))
+            else:
+                cursor.execute("UPDATE elec_officers SET name = %s, email = %s, role = %s WHERE id = %s",
+                               (name, email, role, officer_id))
+            conn.commit()
+            log_audit(session['admin_id'], 'edit_elec_officer', request.remote_addr, details=f"Edited election officer ID {officer_id}")
+            flash("Election officer updated successfully", 'message')
+            return redirect(url_for('manage_elec_officers'))
+        else:  # GET request to show edit form
+            cursor.execute("SELECT id, name, email, password, role FROM elec_officers WHERE id = %s", (officer_id,))
+            officer = cursor.fetchone()
+            if officer:
+                log_audit(session['admin_id'], 'view_edit_elec_officer', request.remote_addr, details=f"Viewing edit form for election officer ID {officer_id}")
+                return render_template_string(ELEC_OFFICERS_TEMPLATE, edit_officer=officer, officers=[])
+            else:
+                log_audit(session['admin_id'], 'view_edit_elec_officer_error', request.remote_addr, details=f"Election officer ID {officer_id} not found")
+                flash("Election officer not found", 'error')
+                return redirect(url_for('manage_elec_officers'))
+    except Exception as e:
+        log_audit(session['admin_id'], 'edit_elec_officer_error', request.remote_addr, details=str(e))
+        flash(f"Error editing election officer: {e}", 'error')
+        return redirect(url_for('manage_elec_officers'))
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/delete_elec_officer/<int:officer_id>', methods=['POST'])
+@require_admin_login
+def delete_elec_officer(officer_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM elec_officers WHERE id = %s", (officer_id,))
+        officer = cursor.fetchone()
+        if officer:
+            cursor.execute("DELETE FROM elec_officers WHERE id = %s", (officer_id,))
+            conn.commit()
+            log_audit(session['admin_id'], 'delete_elec_officer', request.remote_addr, details=f"Deleted election officer ID {officer_id}: {officer[0]}")
+            flash("Election officer deleted successfully", 'message')
+        else:
+            flash("Election officer not found", 'error')
+    except Exception as e:
+        log_audit(session['admin_id'], 'delete_elec_officer_error', request.remote_addr, details=str(e))
+        flash(f"Error deleting election officer: {e}", 'error')
+    finally:
+        if conn:
+            conn.close()
+    return redirect(url_for('manage_elec_officers'))
 
 @app.route('/logout')
 def logout():
