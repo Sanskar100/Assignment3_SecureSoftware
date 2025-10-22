@@ -152,11 +152,13 @@ VOTING_TEMPLATE = """
         .vote-item { background-color: #f0f0f0; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
         .vote-count { font-weight: bold; font-size: 1.2em; color: #00796b; }
         .logout { margin-top: 20px; }
+        .welcome { color: #00796b; font-size: 1.2em; margin-bottom: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Cast Your Vote</h1>
+        <p class="welcome">Welcome: {{ voter_name }}</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -278,7 +280,6 @@ Max_Ratelimit = 5
 Rate_Limitwindow = 360
 blacklisted_ips = set()
 
-
 def password_validation(password):
     if len(password) < 8:
         return "Password must be at least 8 characters long."
@@ -339,14 +340,8 @@ def rate_limitcheck(ip):
         rate_limit[ip] = (1, now)
         return True
 
-rate_limit = {}
-Max_Ratelimit = 5
-Rate_Limitwindow = 360  # 6 minutes
-
 def is_ip_blacklisted(ip):
     return ip in blacklisted_ips
-
-blacklisted_ips = set()
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -356,10 +351,10 @@ def register():
         age = request.form['age']
         sex = request.form['sex']
         password = request.form['password']
-        captcha_response = request.form['captcha'].strip()  # Added strip()
+        captcha_response = request.form['captcha'].strip()
         captcha_answer = session.get('captcha_answer')
 
-        print(f"Register attempt: email={email}, captcha_response='{captcha_response}', captcha_answer={captcha_answer}")  # Added debug print
+        print(f"Register attempt: email={email}, captcha_response='{captcha_response}', captcha_answer={captcha_answer}")
 
         if not captcha_answer or str(captcha_response) != str(captcha_answer):
             flash("CAPTCHA answer is incorrect. Please try again.", 'error')
@@ -420,7 +415,7 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        captcha_response = request.form['captcha'].strip()  # Added strip()
+        captcha_response = request.form['captcha'].strip()
         captcha_answer = session.get('captcha_answer')
         ip_address = request.remote_addr
         print(f"Login attempt: email={email}, captcha_response='{captcha_response}', captcha_answer={captcha_answer}")
@@ -508,10 +503,10 @@ def index():
         """)
         vote_counts = cursor.fetchall()
 
-        return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts)
+        return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts, voter_name=session.get('voter_name', 'Voter'))
     except Exception as e:
         flash(f"Error loading data: {e}", 'error')
-        return render_template_string(VOTING_TEMPLATE, candidates=[], vote_counts=[])
+        return render_template_string(VOTING_TEMPLATE, candidates=[], vote_counts=[], voter_name=session.get('voter_name', 'Voter'))
     finally:
         if conn:
             conn.close()

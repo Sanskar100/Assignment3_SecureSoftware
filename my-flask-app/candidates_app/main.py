@@ -11,7 +11,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')
 app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1-hour session timeout
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 
 # Database configurations
 DB_HOST = os.getenv('DB_HOST', 'db')
@@ -21,8 +21,8 @@ DB_NAME = os.getenv('DB_NAME', 'mydatabase')
 
 # Security configurations
 BLACKLISTED_IPS = []
-RATE_LIMIT_WINDOW = 60  # 1-minute window
-RATE_LIMIT_MAX = 5  # Max 5 attempts per window
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 5
 rate_limit_dict = {}
 
 # HTML templates
@@ -426,13 +426,20 @@ AUDIT_LOGS_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>Audit Logs</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         h1 { color: #0056b3; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; cursor: pointer; }
         th:hover { background-color: #e0e0e0; }
+        td { font-size: 14px; }
+        th:nth-child(1), td:nth-child(1) { width: 10%; } /* ID */
+        th:nth-child(2), td:nth-child(2) { width: 15%; } /* User ID */
+        th:nth-child(3), td:nth-child(3) { width: 20%; } /* Action */
+        th:nth-child(4), td:nth-child(4) { width: 35%; } /* Details */
+        th:nth-child(5), td:nth-child(5) { width: 20%; } /* IP Address */
+        th:nth-child(6), td:nth-child(6) { width: 20%; } /* Timestamp */
         .message { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
         .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
         .logout-link, .nav-link { color: #007bff; text-decoration: none; margin-right: 10px; }
@@ -444,8 +451,8 @@ AUDIT_LOGS_TEMPLATE = """
     </style>
     <script>
         function sortTable(n) {
-            var table, rows, switching = true, i, x, y, shouldSwitch, dir = "asc", switchcount = 0;
-            table = document.querySelector("table");
+            var table = document.querySelector("table");
+            var rows, switching = true, i, x, y, shouldSwitch, dir = "asc", switchcount = 0;
             while (switching) {
                 switching = false;
                 rows = table.rows;
@@ -453,13 +460,25 @@ AUDIT_LOGS_TEMPLATE = """
                     shouldSwitch = false;
                     x = rows[i].getElementsByTagName("TD")[n];
                     y = rows[i + 1].getElementsByTagName("TD")[n];
-                    if (dir == "asc") {
-                        if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
+                    var xVal = x.innerHTML.toLowerCase();
+                    var yVal = y.innerHTML.toLowerCase();
+                    // Handle numeric columns (ID, User ID)
+                    if (n === 0 || n === 1) {
+                        xVal = parseInt(xVal) || 0;
+                        yVal = parseInt(yVal) || 0;
+                    }
+                    // Handle timestamp column
+                    else if (n === 5) {
+                        xVal = new Date(xVal).getTime() || 0;
+                        yVal = new Date(yVal).getTime() || 0;
+                    }
+                    if (dir === "asc") {
+                        if (xVal > yVal) {
                             shouldSwitch = true;
                             break;
                         }
-                    } else if (dir == "desc") {
-                        if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
+                    } else if (dir === "desc") {
+                        if (xVal < yVal) {
                             shouldSwitch = true;
                             break;
                         }
@@ -469,7 +488,7 @@ AUDIT_LOGS_TEMPLATE = """
                     rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
                     switching = true;
                     switchcount++;
-                } else if (switchcount == 0 && dir == "asc") {
+                } else if (switchcount === 0 && dir === "asc") {
                     dir = "desc";
                     switching = true;
                 }
@@ -492,7 +511,7 @@ AUDIT_LOGS_TEMPLATE = """
             {% endfor %}
         {% endif %}
         {% endwith %}
-        <h2>Audit Logs</h2>
+        <h2>Audit Log Entries</h2>
         {% if logs %}
         <table>
             <thead>
@@ -550,17 +569,12 @@ def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Ensure candidates table
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS candidates (
+            CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                sex ENUM('Male', 'Female', 'Other') NOT NULL,
-                age INT NOT NULL,
-                political_party VARCHAR(255) NOT NULL
+                name VARCHAR(255) NOT NULL
             );
         """)
-        # Ensure admins table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS admins (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -570,7 +584,15 @@ def init_db():
                 role ENUM('admin') DEFAULT 'admin'
             );
         """)
-        # Ensure voters table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS elec_officers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                role ENUM('elec_officer') DEFAULT 'elec_officer'
+            );
+        """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voters (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -581,17 +603,26 @@ def init_db():
                 role ENUM('voter') DEFAULT 'voter'
             );
         """)
-        # Ensure elec_officers table
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS elec_officers (
+            CREATE TABLE IF NOT EXISTS candidates (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
-                email VARCHAR(255) NOT NULL UNIQUE,
-                password VARCHAR(255) NOT NULL,
-                role ENUM('elec_officer') DEFAULT 'elec_officer'
+                sex ENUM('Male', 'Female', 'Other') NOT NULL,
+                age INT NOT NULL,
+                political_party VARCHAR(255) NOT NULL
             );
         """)
-        # Ensure audit_logs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS votes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                voter_id INT NOT NULL,
+                candidate_id INT NOT NULL,
+                vote_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (voter_id),
+                FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE CASCADE,
+                FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
+            );
+        """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -703,7 +734,7 @@ def login():
                     if role == 'admin':
                         session['admin_id'] = admin_id
                         session['admin_name'] = admin_name
-                        log_audit(admin_id, 'login_success', ip)
+                        log_audit(admin_id, 'login_success', ip, details=f"Admin {admin_name} logged in")
                         flash("Login successful", 'message')
                         return redirect(url_for('index'))
                     else:
@@ -741,7 +772,7 @@ def index():
         cursor = conn.cursor()
         cursor.execute("SELECT id, name, sex, age, political_party FROM candidates")
         candidates = cursor.fetchall()
-        log_audit(session['admin_id'], 'view_candidates', request.remote_addr)
+        log_audit(session['admin_id'], 'view_candidates', request.remote_addr, details=f"Admin {session['admin_name']} viewed candidates")
         return render_template_string(HOME_TEMPLATE, candidates=candidates, message="Welcome to the Candidate Management App!")
     except Exception as e:
         log_audit(session['admin_id'], 'view_candidates_error', request.remote_addr, details=str(e))
@@ -766,7 +797,6 @@ def add_candidate():
         return redirect(url_for('index'))
     party = request.form['party'].strip()
 
-    # Input validation
     if not re.match(r'^[A-Za-z\s]{1,255}$', name):
         flash("Invalid name format. Use letters and spaces only.", 'error')
         return redirect(url_for('index'))
@@ -815,7 +845,6 @@ def edit_candidate(candidate_id):
                 return redirect(url_for('index'))
             party = request.form['party'].strip()
 
-            # Input validation
             if not re.match(r'^[A-Za-z\s]{1,255}$', name):
                 flash("Invalid name format. Use letters and spaces only.", 'error')
                 return redirect(url_for('index'))
@@ -832,7 +861,7 @@ def edit_candidate(candidate_id):
             log_audit(session['admin_id'], 'edit_candidate', request.remote_addr, details=f"Edited candidate ID {candidate_id}: {name}")
             flash("Candidate updated successfully", 'message')
             return redirect(url_for('index'))
-        else:  # GET request to show edit form
+        else:
             cursor.execute("SELECT id, name, sex, age, political_party FROM candidates WHERE id = %s", (candidate_id,))
             candidate = cursor.fetchone()
             if candidate:
@@ -883,7 +912,7 @@ def manage_voters():
         cursor = conn.cursor()
         cursor.execute("SELECT id, name, email, password, status, role FROM voters")
         voters = cursor.fetchall()
-        log_audit(session['admin_id'], 'view_voters', request.remote_addr)
+        log_audit(session['admin_id'], 'view_voters', request.remote_addr, details=f"Admin {session['admin_name']} viewed voters")
         return render_template_string(VOTERS_TEMPLATE, voters=voters, message="Voter Management")
     except Exception as e:
         log_audit(session['admin_id'], 'view_voters_error', request.remote_addr, details=str(e))
@@ -908,7 +937,6 @@ def edit_voter(voter_id):
             status = request.form['status']
             role = request.form['role']
 
-            # Input validation
             if not re.match(r'^[A-Za-z\s]{1,255}$', name):
                 flash("Invalid name format. Use letters and spaces only.", 'error')
                 return redirect(url_for('manage_voters'))
@@ -936,7 +964,7 @@ def edit_voter(voter_id):
             log_audit(session['admin_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}: {name}")
             flash("Voter updated successfully", 'message')
             return redirect(url_for('manage_voters'))
-        else:  # GET request to show edit form
+        else:
             cursor.execute("SELECT id, name, email, password, status, role FROM voters WHERE id = %s", (voter_id,))
             voter = cursor.fetchone()
             if voter:
@@ -987,7 +1015,7 @@ def manage_elec_officers():
         cursor = conn.cursor()
         cursor.execute("SELECT id, name, email, password, role FROM elec_officers")
         officers = cursor.fetchall()
-        log_audit(session['admin_id'], 'view_elec_officers', request.remote_addr)
+        log_audit(session['admin_id'], 'view_elec_officers', request.remote_addr, details=f"Admin {session['admin_name']} viewed election officers")
         return render_template_string(ELEC_OFFICERS_TEMPLATE, officers=officers, message="Election Officer Management")
     except Exception as e:
         log_audit(session['admin_id'], 'view_elec_officers_error', request.remote_addr, details=str(e))
@@ -1005,7 +1033,6 @@ def add_elec_officer():
     password = request.form['password']
     role = request.form['role']
 
-    # Input validation
     if not re.match(r'^[A-Za-z\s]{1,255}$', name):
         flash("Invalid name format. Use letters and spaces only.", 'error')
         return redirect(url_for('manage_elec_officers'))
@@ -1051,7 +1078,6 @@ def edit_elec_officer(officer_id):
             password = request.form['password']
             role = request.form['role']
 
-            # Input validation
             if not re.match(r'^[A-Za-z\s]{1,255}$', name):
                 flash("Invalid name format. Use letters and spaces only.", 'error')
                 return redirect(url_for('manage_elec_officers'))
@@ -1076,7 +1102,7 @@ def edit_elec_officer(officer_id):
             log_audit(session['admin_id'], 'edit_elec_officer', request.remote_addr, details=f"Edited election officer ID {officer_id}: {name}")
             flash("Election officer updated successfully", 'message')
             return redirect(url_for('manage_elec_officers'))
-        else:  # GET request to show edit form
+        else:
             cursor.execute("SELECT id, name, email, password, role FROM elec_officers WHERE id = %s", (officer_id,))
             officer = cursor.fetchone()
             if officer:
@@ -1122,21 +1148,30 @@ def delete_elec_officer(officer_id):
 @require_admin_login
 def audit_logs():
     page = request.args.get('page', 1, type=int)
-    per_page = 10  # Number of logs per page
+    per_page = 10
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Count total logs for pagination
         cursor.execute("SELECT COUNT(*) FROM audit_logs")
         total_logs = cursor.fetchone()[0]
         total_pages = (total_logs + per_page - 1) // per_page
 
-        # Fetch logs for the current page
         offset = (page - 1) * per_page
-        cursor.execute("SELECT id, user_id, action, details, ip_address, timestamp FROM audit_logs ORDER BY timestamp DESC LIMIT %s OFFSET %s", (per_page, offset))
+        cursor.execute("""
+            SELECT 
+                a.id,
+                a.user_id,
+                a.action,
+                a.details,
+                a.ip_address,
+                a.timestamp
+            FROM audit_logs a
+            ORDER BY a.timestamp DESC
+            LIMIT %s OFFSET %s
+        """, (per_page, offset))
         logs = cursor.fetchall()
-        log_audit(session['admin_id'], 'view_audit_logs', request.remote_addr)
+        log_audit(session['admin_id'], 'view_audit_logs', request.remote_addr, details=f"Admin {session['admin_name']} viewed audit logs")
         return render_template_string(AUDIT_LOGS_TEMPLATE, logs=logs, page=page, total_pages=total_pages)
     except Exception as e:
         log_audit(session['admin_id'], 'view_audit_logs_error', request.remote_addr, details=str(e))
@@ -1148,7 +1183,7 @@ def audit_logs():
 
 @app.route('/logout')
 def logout():
-    log_audit(session.get('admin_id'), 'logout', request.remote_addr)
+    log_audit(session.get('admin_id'), 'logout', request.remote_addr, details=f"Admin {session.get('admin_name', 'Unknown')} logged out")
     session.clear()
     flash("Logged out successfully", 'message')
     return redirect(url_for('login'))
