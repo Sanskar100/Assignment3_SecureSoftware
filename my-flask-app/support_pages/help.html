@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Help & Support | Online Voting System</title>
+  <style>
+    :root { --brand:#0ea5a4; --ink:#0f172a; --muted:#475569; --bg:#f1f5f9 }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+    .container{max-width:900px;margin:0 auto;padding:32px}
+    header,.card{background:white;border-radius:8px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+    header{margin-bottom:24px}
+    h1{margin:0 0 8px;font-size:28px;color:var(--brand)}
+    h2{margin:24px 0 8px}
+    p,li{color:var(--muted);line-height:1.6}
+    .grid{display:grid;gap:16px}
+    .note{background:#ecfeff;border-left:4px solid var(--brand);padding:12px;border-radius:6px}
+    code{background:#f8fafc;padding:2px 6px;border-radius:4px}
+    a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Help & Support</h1>
+      <p>Guides and troubleshooting for voters and administrators.</p>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Voter Guide</h2>
+        <ol>
+          <li>Open the voting page and enter the email you registered with.</li>
+          <li>Choose your candidate and select Cast Vote.</li>
+          <li>If prompted, complete email verification via the code sent to your inbox.</li>
+          <li>Confirm submission. You will see a success message; your vote is recorded.</li>
+        </ol>
+        <div class="note">
+          Tip: You can only vote once. If you made an error, contact your election admin.
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Admin Guide</h2>
+        <ol>
+          <li>Add candidates with accurate names/party details.</li>
+          <li>Register voters or share the self-registration link.</li>
+          <li>Open/close the election window as scheduled.</li>
+          <li>Monitor results in the dashboard; export CSV for auditing if enabled.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Common Issues</h2>
+        <ul>
+          <li>No candidates listed: ensure candidates are created and the election is open.</li>
+          <li>Can’t vote: confirm your email is registered and not already used.</li>
+          <li>No verification email: check spam; ask IT to allow-list the sender domain.</li>
+          <li>Browser problems: try a private window or another supported browser.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Security Best Practices</h2>
+        <ul>
+          <li>Never share verification codes or admin credentials.</li>
+          <li>Use strong, unique passwords and enable MFA for admin accounts.</li>
+          <li>Always access via the official HTTPS link.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Contact Support</h2>
+        <p>For assistance, reach your election administrator. If you need product support, ask me and I’ll route you to the right resource. If you specifically need an email contact, let me know.</p>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
