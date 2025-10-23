@@ -1,10 +1,15 @@
-from flask import Flask, render_template_string, request, redirect, url_for, flash, session
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session, send_file
 import os
 import mysql.connector
 import bcrypt
 import re
 import random
 import time
+import smtplib
+import ssl
+from email.message import EmailMessage
+from datetime import datetime
+import io
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')  # Used for flash messages and sessions
@@ -19,6 +24,14 @@ DB_HOST = os.getenv('DB_HOST', 'db')
 DB_USER = os.getenv('DB_USER', 'user')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'password')
 DB_NAME = os.getenv('DB_NAME', 'mydatabase')
+
+# SMTP / Email configuration (from env)
+SMTP_HOST = os.getenv('SMTP_HOST', '')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+SMTP_USER = os.getenv('SMTP_USER', '')
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
+EMAIL_FROM = os.getenv('EMAIL_FROM', SMTP_USER)
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() in ('1', 'true', 'yes')
 
 # Voter Registration Template
 Register_Voter = """
@@ -325,6 +338,117 @@ def audit_log(user_id, action, details, ip_address):
         if conn:
             conn.close()
 
+# New: helper to send vote confirmation emails
+def send_vote_confirmation_email(recipient_email, voter_name, candidate_name, voter_id=None, ip_address=None):
+    # Simplified wrapper for a vote confirmation using the generic sender
+    subject = "Vote Confirmation"
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    body = f"""Hello {voter_name},
+
+This is a confirmation that your vote was received.
+
+Voter ID: {voter_id or 'N/A'}
+Candidate: {candidate_name}
+Time: {timestamp}
+
+If you did not cast this vote, please contact the election administrators immediately.
+
+Regards,
+Voting System
+"""
+    return send_system_email(recipient_email, subject, body, user_id=voter_id, ip_address=ip_address, tag='vote_confirmation')
+
+def send_system_email(recipient_email, subject, body, user_id=None, ip_address=None, tag='system'):
+    """
+    Robust email sender:
+    - Uses configured SMTP_HOST/SMTP_PORT with optional STARTTLS or SSL.
+    - If no SMTP_HOST configured, attempts localhost (port 25).
+    - If delivery is not possible, prints email to stdout as a fallback (and still audits).
+    Returns True if email was "sent" (or printed), False on fatal failure.
+    """
+    global SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, EMAIL_USE_TLS, EMAIL_FROM
+
+    # Ensure a sensible From address
+    if not EMAIL_FROM:
+        EMAIL_FROM = SMTP_USER or 'no-reply@example.com'
+
+    msg = EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = EMAIL_FROM
+    msg['To'] = recipient_email
+    msg.set_content(body)
+
+    # Try configured SMTP
+    try:
+        if SMTP_HOST:
+            # Prefer TLS upgrade when requested
+            if EMAIL_USE_TLS:
+                with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+                    server.ehlo()
+                    try:
+                        server.starttls(context=ssl.create_default_context())
+                        server.ehlo()
+                    except Exception as e:
+                        # If STARTTLS fails, continue and try without it (but log)
+                        print(f"Warning: STARTTLS failed: {e}")
+                    # Login only if credentials provided
+                    if SMTP_USER and SMTP_PASSWORD:
+                        server.login(SMTP_USER, SMTP_PASSWORD)
+                    server.send_message(msg)
+            else:
+                # If using SSL port (commonly 465) prefer SMTP_SSL
+                if SMTP_PORT == 465:
+                    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context(), timeout=10) as server:
+                        if SMTP_USER and SMTP_PASSWORD:
+                            server.login(SMTP_USER, SMTP_PASSWORD)
+                        server.send_message(msg)
+                else:
+                    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+                        if SMTP_USER and SMTP_PASSWORD:
+                            server.login(SMTP_USER, SMTP_PASSWORD)
+                        server.send_message(msg)
+            audit_log(user_id, f'email_sent_{tag}', f'Email sent to {recipient_email} via {SMTP_HOST}:{SMTP_PORT}', ip_address)
+            return True
+        else:
+            # Try localhost (no auth)
+            try:
+                with smtplib.SMTP('localhost', 25, timeout=10) as server:
+                    server.send_message(msg)
+                audit_log(user_id, f'email_sent_{tag}', f'Email sent to {recipient_email} via localhost', ip_address)
+                return True
+            except Exception as e_local:
+                # As last resort, print the email to stdout so it's available in logs
+                print("SMTP not configured and localhost send failed. Printing email to stdout as fallback.")
+                print("----- EMAIL START -----")
+                print(f"To: {recipient_email}")
+                print(f"Subject: {subject}")
+                print(body)
+                print("----- EMAIL END -----")
+                audit_log(user_id, f'email_printed_{tag}', f'Email printed to console for {recipient_email}: {e_local}', ip_address)
+                return True
+    except Exception as e:
+        print(f"Failed to send email to {recipient_email}: {e}")
+        audit_log(user_id, f'email_failed_{tag}', f'Failed to send email to {recipient_email}: {e}', ip_address)
+        return False
+
+# New helper: create an in-memory text receipt for download
+def make_vote_receipt_bytes(voter_name, candidate_name, voter_id=None, ip_address=None):
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    receipt_text = f"""Vote Receipt
+Voter: {voter_name}
+Voter ID: {voter_id or 'N/A'}
+Candidate: {candidate_name}
+Time: {timestamp}
+IP: {ip_address or 'N/A'}
+
+This is an official receipt for your vote.
+"""
+    buf = io.BytesIO()
+    buf.write(receipt_text.encode('utf-8'))
+    buf.seek(0)
+    filename = f"vote_receipt_{voter_id or 'unknown'}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.txt"
+    return buf, filename
+
 def rate_limitcheck(ip):
     now = time.time()
     if ip in rate_limit:
@@ -395,6 +519,26 @@ def register():
             conn.commit()
             flash("Registration successful! You can now log in.", 'success')
             print(f"Registration successful for {email}")
+
+            # Send a system-generated registration email (best-effort, won't block user)
+            try:
+                subject = "Welcome to the Voting System"
+                body = f"""Hello {name},
+
+Thank you for registering as a voter.
+
+Your account has been created and is pending approval by the election administrators. You will receive another email when your account is approved.
+
+If you did not register, please contact support.
+
+Regards,
+Voting System
+"""
+                send_system_email(email, subject, body, user_id=None, ip_address=request.remote_addr, tag='registration')
+            except Exception as ee:
+                print(f"Failed to send registration email to {email}: {ee}")
+                audit_log(None, 'email_registration_failed', f'Failed to send registration email to {email}: {ee}', request.remote_addr)
+
             return redirect(url_for('login'))
         except mysql.connector.Error as err:
             flash(f"Database error: {err}", 'error')
@@ -542,15 +686,35 @@ def vote():
             flash("You have already cast your vote!", 'info')
             return redirect(url_for('index'))
           
-        cursor.execute("SELECT id FROM candidates WHERE id = %s", (candidate_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, name FROM candidates WHERE id = %s", (candidate_id,))
+        candidate_row = cursor.fetchone()
+        if not candidate_row:
             flash("Error: Invalid candidate selected.", 'error')
             return redirect(url_for('index'))
+
+        candidate_name = candidate_row[1]
 
         # 3. Cast the vote
         cursor.execute("INSERT INTO votes (voter_id, candidate_id) VALUES (%s, %s)", (voter_id, candidate_id))
         conn.commit()
         flash("Your vote has been cast successfully!", 'success')
+
+        # Instead of sending an email, generate a downloadable receipt and return it
+        try:
+            # Fetch voter's name for the receipt (best-effort)
+            cursor.execute("SELECT name FROM voters WHERE id = %s", (voter_id,))
+            voter_row = cursor.fetchone()
+            voter_name = (voter_row[0] if voter_row else session.get('voter_name', 'Voter'))
+
+            buf, filename = make_vote_receipt_bytes(voter_name, candidate_name, voter_id=voter_id, ip_address=request.remote_addr)
+            audit_log(voter_id, 'receipt_generated', f'Receipt generated for vote for {candidate_name}', request.remote_addr)
+            # Return the receipt as a downloadable file (text)
+            return send_file(buf, as_attachment=True, download_name=filename, mimetype='text/plain')
+        except Exception as e:
+            # Log but keep user experience (redirect) if download failed
+            print(f"Failed to generate/download receipt: {e}")
+            audit_log(voter_id, 'receipt_generation_failed', f'Failed to generate receipt: {e}', request.remote_addr)
+
     except Exception as e:
         flash(f"An unexpected error occurred: {e}", 'error')
     finally:
