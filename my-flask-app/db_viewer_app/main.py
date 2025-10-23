@@ -19,8 +19,9 @@ if ENCRYPTION_KEY:
     try:
         cipher_suite = Fernet(ENCRYPTION_KEY.encode())
     except Exception as e:
-        # If the provided key is invalid, raise so deployer can fix it early
-        raise ValueError(f"Invalid ENCRYPTION_KEY provided: {e}")
+        # Log the problem and continue without decryption instead of raising
+        app.logger.error(f"Invalid ENCRYPTION_KEY provided; disabling decryption. Error: {e}")
+        cipher_suite = None
 else:
     # don't raise here; the app will show raw/decoded values when cipher is not available
     app.logger.warning("ENCRYPTION_KEY not set. Encrypted fields will not be decrypted.")
@@ -133,10 +134,12 @@ def get_db_connection():
 @app.route('/')
 def index():
     conn = None
+    cursor = None
     all_tables_data = {}
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        # use a buffered cursor to avoid "Unread result" issues when reusing the same cursor
+        cursor = conn.cursor(buffered=True)
 
         # Get all table names in the database
         cursor.execute("SHOW TABLES")
@@ -162,10 +165,43 @@ def index():
                 processed_rows = []
                 for row_tuple in raw_rows:
                     new_row = list(row_tuple) # Convert to list to modify
+
+                    # voters: decrypt email column when present
                     if safe_table == 'voters' and 'email' in columns:
                         email_index = columns.index('email')
                         if email_index < len(new_row):
                             new_row[email_index] = decrypt_data(new_row[email_index])
+
+                    # database_alert: decrypt message column and flash the alert based on severity
+                    if safe_table == 'database_alert' and 'message' in columns:
+                        msg_index = columns.index('message')
+                        if msg_index < len(new_row):
+                            # Decrypt or normalize message text
+                            decrypted_msg = decrypt_data(new_row[msg_index])
+                            new_row[msg_index] = decrypted_msg
+
+                            # Determine severity/category if available
+                            severity = None
+                            if 'severity' in columns:
+                                sev_idx = columns.index('severity')
+                                if sev_idx < len(new_row):
+                                    try:
+                                        severity = str(new_row[sev_idx]).lower()
+                                    except Exception:
+                                        severity = None
+
+                            # Map severity to flash category
+                            if severity in ('critical', 'error', 'danger'):
+                                category = 'error'
+                            elif severity in ('success', 'ok'):
+                                category = 'success'
+                            else:
+                                category = 'info'
+
+                            # Compose and flash the alert (short and non-sensitive)
+                            flash_msg = decrypted_msg if decrypted_msg else "[empty alert message]"
+                            flash(flash_msg, category)
+
                     processed_rows.append(tuple(new_row))
 
                 rows = processed_rows
@@ -178,7 +214,9 @@ def index():
 
             all_tables_data[table_name] = {'columns': columns, 'rows': rows}
 
-        cursor.close()
+        # close cursor if it was created
+        if cursor:
+            cursor.close()
 
     except Exception as e:
         app.logger.exception(f"Error connecting to database or fetching tables: {e}")
