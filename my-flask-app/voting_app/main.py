@@ -10,6 +10,8 @@ import ssl
 from email.message import EmailMessage
 from datetime import datetime
 import io
+import hashlib
+import hmac
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')  # Used for flash messages and sessions
@@ -257,19 +259,83 @@ def init_db():
         cursor.execute("SHOW COLUMNS FROM voters LIKE 'sex'")
         if not cursor.fetchone():
             cursor.execute("ALTER TABLE voters ADD COLUMN sex ENUM('Male', 'Female', 'Other') NOT NULL")
-        # Create votes table if not exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS votes (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                voter_id INT NOT NULL,
-                candidate_id INT NOT NULL,
-                vote_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
-                UNIQUE (voter_id), # Ensure one vote per voter (Security Requirement)
-                FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE CASCADE,
-                FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
-            );
-        """)
+
+        # Votes table migration / creation:
+        # - Add voter_hash (VARCHAR) and ensure unique index on it.
+        # - Drop strict FOREIGN KEY on voter_id (so numeric id isn't required to be stored).
+        # - Keep candidate_id FK.
+        cursor.execute("CREATE TABLE IF NOT EXISTS votes (id INT AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;")
+        # Ensure voter_hash column exists
+        cursor.execute("SHOW COLUMNS FROM votes LIKE 'voter_hash'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE votes ADD COLUMN voter_hash VARCHAR(255) NULL")
+        # Ensure candidate_id column exists
+        cursor.execute("SHOW COLUMNS FROM votes LIKE 'candidate_id'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE votes ADD COLUMN candidate_id INT NULL")
+        # Ensure vote_time column exists
+        cursor.execute("SHOW COLUMNS FROM votes LIKE 'vote_time'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE votes ADD COLUMN vote_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        # Remove unique index on voter_id if it exists (we'll enforce uniqueness on voter_hash)
+        try:
+            cursor.execute("SHOW INDEX FROM votes WHERE Column_name = 'voter_id' AND Non_unique = 0")
+            idx = cursor.fetchone()
+            if idx:
+                # index name in result is at position 2 (Key_name) for SHOW INDEX
+                idx_name = idx[2]
+                cursor.execute(f"ALTER TABLE votes DROP INDEX `{idx_name}`")
+        except Exception:
+            pass
+        # Drop foreign key constraint on voter_id if exists
+        try:
+            cursor.execute("""
+                SELECT CONSTRAINT_NAME
+                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'votes' AND REFERENCED_TABLE_NAME = 'voters' AND COLUMN_NAME = 'voter_id'
+            """, (DB_NAME,))
+            fk = cursor.fetchone()
+            if fk:
+                fk_name = fk[0]
+                cursor.execute(f"ALTER TABLE votes DROP FOREIGN KEY `{fk_name}`")
+                # allow voter_id to be NULL if present
+                cursor.execute("SHOW COLUMNS FROM votes LIKE 'voter_id'")
+                if cursor.fetchone():
+                    cursor.execute("ALTER TABLE votes MODIFY COLUMN voter_id INT NULL")
+        except Exception:
+            pass
+        # Ensure unique index on voter_hash so each voter_hash can only vote once
+        try:
+            cursor.execute("SHOW INDEX FROM votes WHERE Column_name = 'voter_hash' AND Non_unique = 0")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE votes ADD UNIQUE INDEX ux_votes_voter_hash (voter_hash(64))")
+        except Exception:
+            # Some MySQL variants don't permit prefix index on long fields in the same way; fall back to full column unique if possible
+            try:
+                cursor.execute("ALTER TABLE votes ADD UNIQUE (voter_hash)")
+            except Exception:
+                pass
+        # Ensure candidate_id foreign key exists (re-create if missing)
+        try:
+            cursor.execute("""
+                SELECT CONSTRAINT_NAME
+                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'votes' AND REFERENCED_TABLE_NAME = 'candidates' AND COLUMN_NAME = 'candidate_id'
+            """, (DB_NAME,))
+            fk_cand = cursor.fetchone()
+            if not fk_cand:
+                # Add an index then a foreign key constraint (safe even if column already indexed)
+                try:
+                    cursor.execute("ALTER TABLE votes ADD INDEX idx_votes_candidate_id (candidate_id)")
+                except Exception:
+                    pass
+                try:
+                    cursor.execute("ALTER TABLE votes ADD CONSTRAINT fk_votes_candidate FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # Create audit_logs table if not exists
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
@@ -282,7 +348,7 @@ def init_db():
             );
         """)
         conn.commit()
-        print("Database tables checked/created successfully.")
+        print("Database tables checked/created/migrated successfully.")
     except Exception as e:
         print(f"Error initializing voting database: {e}")
     finally:
@@ -434,9 +500,21 @@ def send_system_email(recipient_email, subject, body, user_id=None, ip_address=N
 # New helper: create an in-memory text receipt for download
 def make_vote_receipt_bytes(voter_name, candidate_name, voter_id=None, ip_address=None):
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Mask the voter identifier so numeric id is not directly revealed; if it's a long hash use short prefix
+    masked_identifier = 'N/A'
+    if voter_id:
+        s = str(voter_id)
+        if len(s) >= 16:  # likely a hash
+            masked_identifier = f"{s[:8]}...{s[-4:]}"
+        else:
+            # If numeric, do not include raw id; instead include hashed short form
+            try:
+                masked_identifier = make_voter_hash(s)[:12]
+            except Exception:
+                masked_identifier = 'masked'
     receipt_text = f"""Vote Receipt
 Voter: {voter_name}
-Voter ID: {voter_id or 'N/A'}
+Voter Identifier: {masked_identifier}
 Candidate: {candidate_name}
 Time: {timestamp}
 IP: {ip_address or 'N/A'}
@@ -446,7 +524,8 @@ This is an official receipt for your vote.
     buf = io.BytesIO()
     buf.write(receipt_text.encode('utf-8'))
     buf.seek(0)
-    filename = f"vote_receipt_{voter_id or 'unknown'}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.txt"
+    filename_safe = (str(voter_id)[:8] if voter_id else 'unknown')
+    filename = f"vote_receipt_{filename_safe}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.txt"
     return buf, filename
 
 def rate_limitcheck(ip):
@@ -680,8 +759,11 @@ def vote():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # 1. Check if voter has already voted
-        cursor.execute("SELECT id FROM votes WHERE voter_id = %s", (voter_id,))
+        # Create deterministic hash for this voter (so DB stores non-reversible token)
+        voter_hash = make_voter_hash(voter_id)
+
+        # 1. Check if voter has already voted by checking voter_hash uniqueness
+        cursor.execute("SELECT id FROM votes WHERE voter_hash = %s", (voter_hash,))
         if cursor.fetchone():
             flash("You have already cast your vote!", 'info')
             return redirect(url_for('index'))
@@ -694,8 +776,8 @@ def vote():
 
         candidate_name = candidate_row[1]
 
-        # 3. Cast the vote
-        cursor.execute("INSERT INTO votes (voter_id, candidate_id) VALUES (%s, %s)", (voter_id, candidate_id))
+        # 3. Cast the vote storing only voter_hash (not the plain numeric voter_id)
+        cursor.execute("INSERT INTO votes (voter_hash, candidate_id) VALUES (%s, %s)", (voter_hash, candidate_id))
         conn.commit()
         flash("Your vote has been cast successfully!", 'success')
 
@@ -706,7 +788,8 @@ def vote():
             voter_row = cursor.fetchone()
             voter_name = (voter_row[0] if voter_row else session.get('voter_name', 'Voter'))
 
-            buf, filename = make_vote_receipt_bytes(voter_name, candidate_name, voter_id=voter_id, ip_address=request.remote_addr)
+            # Use the voter_hash (masked) rather than raw numeric id in receipt
+            buf, filename = make_vote_receipt_bytes(voter_name, candidate_name, voter_id=voter_hash, ip_address=request.remote_addr)
             audit_log(voter_id, 'receipt_generated', f'Receipt generated for vote for {candidate_name}', request.remote_addr)
             # Return the receipt as a downloadable file (text)
             return send_file(buf, as_attachment=True, download_name=filename, mimetype='text/plain')
@@ -721,6 +804,16 @@ def vote():
         if conn:
             conn.close()
     return redirect(url_for('index'))
+
+# New: secret for hashing voter ids (use a strong secret in prod via env)
+VOTE_HASH_SECRET = os.getenv('VOTE_HASH_SECRET', 'default_dev_vote_secret')
+
+# New helper: deterministic HMAC-based voter hash (so same voter -> same hash, but not reversible without secret)
+def make_voter_hash(voter_id):
+    # ensure string input
+    msg = str(voter_id).encode('utf-8')
+    key = VOTE_HASH_SECRET.encode('utf-8')
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 def wait_for_db(max_retries=60, retry_delay=2):
     retries = 0
