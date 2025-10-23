@@ -219,7 +219,7 @@ HOME_TEMPLATE = """
         {% endwith %}
         {% if edit_candidate %}
         <h2>Edit Candidate (ID: {{ edit_candidate[0] }})</h2>
-        <form method="POST" action="/edit/{{ edit_candidate[0] }}">
+        <form method="POST" action="/edit/{{ edit_candidate[0] }}" onsubmit="return confirm('Are you sure you want to update this candidate\'s information?')">
             <label for="name">Name:</label><br>
             <input type="text" id="name" name="name" value="{{ edit_candidate[1] }}" required><br><br>
             <label for="sex">Sex:</label><br>
@@ -261,7 +261,7 @@ HOME_TEMPLATE = """
                         <form class="delete-form" method="GET" action="/edit/{{ candidate[0] }}">
                             <input type="submit" value="Edit" class="edit-button">
                         </form>
-                        <form class="delete-form" method="POST" action="/delete/{{ candidate[0] }}">
+                        <form class="delete-form" method="POST" action="/delete/{{ candidate[0] }}" onsubmit="return confirm('Are you sure you want to delete this candidate?')">
                             <input type="submit" value="Delete" class="delete-button">
                         </form>
                     </td>
@@ -274,7 +274,7 @@ HOME_TEMPLATE = """
         {% endif %}
 
         <h2>Add New Candidate</h2>
-        <form method="POST" action="/add">
+        <form method="POST" action="/add" onsubmit="return confirm('Are you sure you want to add this candidate?')">
             <label for="name">Name:</label><br>
             <input type="text" id="name" name="name" required><br><br>
             <label for="sex">Sex:</label><br>
@@ -342,7 +342,7 @@ VOTERS_TEMPLATE = """
         {% endwith %}
         {% if edit_voter %}
         <h2>Edit Voter (ID: {{ edit_voter[0] }})</h2>
-        <form method="POST" action="/edit_voter/{{ edit_voter[0] }}">
+        <form method="POST" action="/edit_voter/{{ edit_voter[0] }}" onsubmit="return confirm('Are you sure you want to update this voter\'s information?')">
             <label for="name">Name:</label><br>
             <input type="text" id="name" name="name" value="{{ edit_voter[1] }}" required><br><br>
             <label for="email">Email:</label><br>
@@ -387,7 +387,7 @@ VOTERS_TEMPLATE = """
                         <form class="delete-form" method="GET" action="/edit_voter/{{ voter[0] }}">
                             <input type="submit" value="Edit" class="edit-button">
                         </form>
-                        <form class="delete-form" method="POST" action="/delete_voter/{{ voter[0] }}">
+                        <form class="delete-form" method="POST" action="/delete_voter/{{ voter[0] }}" onsubmit="return confirm('Are you sure you want to delete this voter?')">
                             <input type="submit" value="Delete" class="delete-button">
                         </form>
                     </td>
@@ -451,7 +451,7 @@ ELEC_OFFICERS_TEMPLATE = """
         {% endwith %}
         {% if edit_officer %}
         <h2>Edit Election Officer (ID: {{ edit_officer[0] }})</h2>
-        <form method="POST" action="/edit_elec_officer/{{ edit_officer[0] }}">
+        <form method="POST" action="/edit_elec_officer/{{ edit_officer[0] }}" onsubmit="return confirm('Are you sure you want to update this election officer\'s information?')">
             <label for="name">Name:</label><br>
             <input type="text" id="name" name="name" value="{{ edit_officer[1] }}" required><br><br>
             <label for="email">Email:</label><br>
@@ -489,7 +489,7 @@ ELEC_OFFICERS_TEMPLATE = """
                         <form class="delete-form" method="GET" action="/edit_elec_officer/{{ officer[0] }}">
                             <input type="submit" value="Edit" class="edit-button">
                         </form>
-                        <form class="delete-form" method="POST" action="/delete_elec_officer/{{ officer[0] }}">
+                        <form class="delete-form" method="POST" action="/delete_elec_officer/{{ officer[0] }}" onsubmit="return confirm('Are you sure you want to delete this election officer?')">
                             <input type="submit" value="Delete" class="delete-button">
                         </form>
                     </td>
@@ -502,7 +502,7 @@ ELEC_OFFICERS_TEMPLATE = """
         {% endif %}
 
         <h2>Add New Election Officer</h2>
-        <form method="POST" action="/add_elec_officer">
+        <form method="POST" action="/add_elec_officer" onsubmit="return confirm('Are you sure you want to add this election officer?')">
             <label for="name">Name:</label><br>
             <input type="text" id="name" name="name" required><br><br>
             <label for="email">Email:</label><br>
