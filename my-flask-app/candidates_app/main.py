@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session
 import os
 import mysql.connector
 import bcrypt
@@ -178,7 +178,7 @@ HOME_TEMPLATE = """
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Candidate List</title>
+    <title>Candidate Management</title>
     <style>
         body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
         .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -190,16 +190,52 @@ HOME_TEMPLATE = """
         form input[type="text"], form input[type="number"], form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
         form input[type="submit"] { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         form input[type="submit"]:hover { background-color: #0056b3; }
+        .action-buttons { display: flex; gap: 5px; }
+        .edit-button { background-color: #ffc107; color: #212529; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .edit-button:hover { background-color: #e0a800; }
         .delete-form { display: inline; }
         .delete-button { background-color: #dc3545; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
         .delete-button:hover { background-color: #c82333; }
         .message { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .logout-link, .nav-link { color: #007bff; text-decoration: none; margin-right: 10px; }
+        .logout-link:hover, .nav-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Candidate List Application</h1>
-        <p>{{ message }}</p>
+        <h1>Candidate Management Application</h1>
+        <p>Welcome, {{ session['admin_name'] }}! 
+           <a class="nav-link" href="/manage_voters">Manage Voters</a> |
+           <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
+           <a class="nav-link" href="/audit_logs">View Audit Logs</a> |
+           <a class="logout-link" href="/logout">Logout</a></p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+        {% if edit_candidate %}
+        <h2>Edit Candidate (ID: {{ edit_candidate[0] }})</h2>
+        <form method="POST" action="/edit/{{ edit_candidate[0] }}">
+            <label for="name">Name:</label><br>
+            <input type="text" id="name" name="name" value="{{ edit_candidate[1] }}" required><br><br>
+            <label for="sex">Sex:</label><br>
+            <select id="sex" name="sex" required>
+                <option value="Male" {% if edit_candidate[2] == 'Male' %}selected{% endif %}>Male</option>
+                <option value="Female" {% if edit_candidate[2] == 'Female' %}selected{% endif %}>Female</option>
+                <option value="Other" {% if edit_candidate[2] == 'Other' %}selected{% endif %}>Other</option>
+            </select><br><br>
+            <label for="age">Age:</label><br>
+            <input type="number" id="age" name="age" value="{{ edit_candidate[3] }}" required min="18"><br><br>
+            <label for="party">Political Party:</label><br>
+            <input type="text" id="party" name="party" value="{{ edit_candidate[4] }}" required><br><br>
+            <input type="submit" value="Update Candidate">
+            <a href="/" style="margin-left: 10px;">Cancel</a>
+        </form>
+        {% else %}
         <h2>Current Candidates</h2>
         {% if candidates %}
         <table>
@@ -221,7 +257,10 @@ HOME_TEMPLATE = """
                     <td>{{ candidate[2] }}</td>
                     <td>{{ candidate[3] }}</td>
                     <td>{{ candidate[4] }}</td>
-                    <td>
+                    <td class="action-buttons">
+                        <form class="delete-form" method="GET" action="/edit/{{ candidate[0] }}">
+                            <input type="submit" value="Edit" class="edit-button">
+                        </form>
                         <form class="delete-form" method="POST" action="/delete/{{ candidate[0] }}">
                             <input type="submit" value="Delete" class="delete-button">
                         </form>
@@ -245,7 +284,7 @@ HOME_TEMPLATE = """
                 <option value="Other">Other</option>
             </select><br><br>
             <label for="age">Age:</label><br>
-            <input type="number" id="age" name="age" required><br><br>
+            <input type="number" id="age" name="age" required min="18"><br><br>
             <label for="party">Political Party:</label><br>
             <input type="text" id="party" name="party" required><br><br>
             <input type="submit" value="Add Candidate">
@@ -667,7 +706,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS candidates (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
-                sex VARCHAR(50) NOT NULL,
+                sex ENUM('Male', 'Female', 'Other') NOT NULL,
                 age INT NOT NULL,
                 political_party VARCHAR(255) NOT NULL
             );
@@ -958,12 +997,13 @@ def verify_mfa():
     return render_template_string(MFA_VERIFY_TEMPLATE)
 
 @app.route('/')
+@require_admin_login
 def index():
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM candidates")
+        cursor.execute("SELECT id, name, sex, age, political_party FROM candidates")
         candidates = cursor.fetchall()
         log_audit(session['admin_id'], 'View candidates', request.remote_addr, "Access candidate management page")
         return render_template_string(HOME_TEMPLATE, candidates=candidates)
@@ -976,8 +1016,9 @@ def index():
             conn.close()
 
 @app.route('/add', methods=['POST'])
+@require_admin_login
 def add_candidate():
-    name = request.form['name']
+    name = request.form['name'].strip()
     sex = request.form['sex']
     try:
         age = int(request.form['age'])
@@ -1080,6 +1121,7 @@ def edit_candidate(candidate_id):
             conn.close()
 
 @app.route('/delete/<int:candidate_id>', methods=['POST'])
+@require_admin_login
 def delete_candidate(candidate_id):
     conn = None
     try:
