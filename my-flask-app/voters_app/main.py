@@ -1,16 +1,71 @@
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session
 import os
 import mysql.connector
+import bcrypt
+import random
+import time
+import re
 
 app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 
-# Database connection details from environment variables
+# Database configurations
 DB_HOST = os.getenv('DB_HOST', 'db')
 DB_USER = os.getenv('DB_USER', 'user')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'password')
 DB_NAME = os.getenv('DB_NAME', 'mydatabase')
+BLACKLISTED_IPS = []
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 5
+rate_limit_dict = {}
 
-# HTML templates for rendering
+ELEC_OFFICER_LOGIN_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Election Officer Login</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f0f8ff; color: #333; }
+        .container { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #28a745; }
+        form { padding: 15px; border: 1px solid #ccf; border-radius: 5px; background-color: #f7fcff; }
+        form input[type="email"], form input[type="password"], form input[type="text"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form input[type="submit"] { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        form input[type="submit"]:hover { background-color: #218838; }
+        .message { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Election Officer Login</h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+        <form method="POST" action="/login">
+            <label for="email">Email:</label><br>
+            <input type="email" id="email" name="email" required><br><br>
+            <label for="password">Password:</label><br>
+            <input type="password" id="password" name="password" required><br><br>
+            <label for="captcha">CAPTCHA: {{ captcha_question }}</label><br>
+            <input type="text" id="captcha" name="captcha" required><br><br>
+            <input type="submit" value="Login">
+        </form>
+    </div>
+</body>
+</html>
+"""
+
 VOTERS_TEMPLATE = """
 <!doctype html>
 <html lang="en">
@@ -26,7 +81,8 @@ VOTERS_TEMPLATE = """
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #e6ffe6; }
         form { margin-top: 20px; padding: 15px; border: 1px solid #ccf; border-radius: 5px; background-color: #f7fcff; }
-        form input[type="text"], form input[type="email"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form input[type="text"], form input[type="email"], form input[type="number"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        form select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
         form input[type="submit"] { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         form input[type="submit"]:hover { background-color: #218838; }
         .action-buttons { display: flex; gap: 5px; }
@@ -35,14 +91,22 @@ VOTERS_TEMPLATE = """
         .delete-form { display: inline; }
         .delete-button { background-color: #dc3545; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
         .delete-button:hover { background-color: #c82333; }
+        .approve-button { background-color: #28a745; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }
+        .approve-button:hover { background-color: #218838; }
         .message { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Voter Registration Application</h1>
-        <p>{{ message }}</p>
-
+        <p>Welcome, {{ session['elec_officer_name'] }}! <a class="logout-link" href="/logout">Logout</a></p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
         {% if edit_voter %}
         <h2>Edit Voter (ID: {{ edit_voter[0] }})</h2>
         <form method="POST" action="/edit/{{ edit_voter[0] }}">
@@ -50,6 +114,20 @@ VOTERS_TEMPLATE = """
             <input type="text" id="name" name="name" value="{{ edit_voter[1] }}" required><br><br>
             <label for="email">Email:</label><br>
             <input type="email" id="email" name="email" value="{{ edit_voter[2] }}" required><br><br>
+            <label for="age">Age:</label><br>
+            <input type="number" id="age" name="age" value="{{ edit_voter[3] }}" required min="18"><br><br>
+            <label for="sex">Sex:</label><br>
+            <select id="sex" name="sex" required>
+                <option value="Male" {% if edit_voter[4] == 'Male' %}selected{% endif %}>Male</option>
+                <option value="Female" {% if edit_voter[4] == 'Female' %}selected{% endif %}>Female</option>
+                <option value="Other" {% if edit_voter[4] == 'Other' %}selected{% endif %}>Other</option>
+            </select><br><br>
+            <label for="status">Status:</label><br>
+            <select id="status" name="status" required>
+                <option value="submitted" {% if edit_voter[5] == 'submitted' %}selected{% endif %}>Submitted</option>
+                <option value="accepted" {% if edit_voter[5] == 'accepted' %}selected{% endif %}>Accepted</option>
+                <option value="rejected" {% if edit_voter[5] == 'rejected' %}selected{% endif %}>Rejected</option>
+            </select><br><br>
             <input type="submit" value="Update Voter">
             <a href="/" style="margin-left: 10px;">Cancel</a>
         </form>
@@ -62,6 +140,9 @@ VOTERS_TEMPLATE = """
                     <th>ID</th>
                     <th>Name</th>
                     <th>Email</th>
+                    <th>Age</th>
+                    <th>Sex</th>
+                    <th>Status</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -71,7 +152,15 @@ VOTERS_TEMPLATE = """
                     <td>{{ voter[0] }}</td>
                     <td>{{ voter[1] }}</td>
                     <td>{{ voter[2] }}</td>
+                    <td>{{ voter[3] }}</td>
+                    <td>{{ voter[4] }}</td>
+                    <td>{{ voter[5] }}</td>
                     <td class="action-buttons">
+                        {% if voter[5] == 'submitted' %}
+                        <form class="delete-form" method="POST" action="/approve/{{ voter[0] }}">
+                            <input type="submit" value="Approve" class="approve-button">
+                        </form>
+                        {% endif %}
                         <form class="delete-form" method="GET" action="/edit/{{ voter[0] }}">
                             <input type="submit" value="Edit" class="edit-button">
                         </form>
@@ -84,17 +173,8 @@ VOTERS_TEMPLATE = """
             </tbody>
         </table>
         {% else %}
-        <p>No voters registered yet. Add one below!</p>
+        <p>No voters registered yet.</p>
         {% endif %}
-
-        <h2>Register New Voter</h2>
-        <form method="POST" action="/add">
-            <label for="name">Name:</label><br>
-            <input type="text" id="name" name="name" required><br><br>
-            <label for="email">Email:</label><br>
-            <input type="email" id="email" name="email" required><br><br>
-            <input type="submit" value="Register Voter">
-        </form>
         {% endif %}
     </div>
 </body>
@@ -114,11 +194,39 @@ def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Election officers table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS elec_officers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                role ENUM('elec_officer') DEFAULT 'elec_officer'
+            );
+        """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voters (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
-                email VARCHAR(255) NOT NULL UNIQUE
+                email VARCHAR(255) NOT NULL UNIQUE,
+                status ENUM('submitted', 'accepted', 'rejected') DEFAULT 'submitted'
+            );
+        """)
+        # Add age and sex if not exist
+        cursor.execute("SHOW COLUMNS FROM voters LIKE 'age'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE voters ADD COLUMN age INT NOT NULL DEFAULT 18")
+        cursor.execute("SHOW COLUMNS FROM voters LIKE 'sex'")
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE voters ADD COLUMN sex ENUM('Male', 'Female', 'Other') NOT NULL DEFAULT 'Other'")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                action VARCHAR(255),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip VARCHAR(45),
+                details TEXT
             );
         """)
         conn.commit()
@@ -129,44 +237,153 @@ def init_db():
         if conn:
             conn.close()
 
+def require_elec_officer_login(f):
+    def decorated_function(*args, **kwargs):
+        if 'elec_officer_id' not in session:
+            flash("Please log in to access this page", 'error')
+            return redirect(url_for('elec_officer_login'))
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
 @app.before_request
 def before_first_request():
     init_db()
 
+def validate_password_strength(password):
+    if len(password) < 8 or not re.search("[A-Z]", password) or not re.search("[a-z]", password) or not re.search("\d", password) or not re.search("[!@#$%^&*]", password):
+        return False
+    return True
+
+def generate_captcha():
+    num1 = random.randint(1, 10)
+    num2 = random.randint(1, 10)
+    operation = random.choice(['+', '-'])
+    question = f"What is {num1} {operation} {num2}?"
+    answer = num1 + num2 if operation == '+' else num1 - num2
+    return question, str(answer)
+
+def log_audit(user_id, action, ip, details=''):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO audit_logs (user_id, action, ip, details) VALUES (%s, %s, %s, %s)", (user_id, action, ip, details))
+        conn.commit()
+    except Exception as e:
+        print(f"Error logging audit: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def is_ip_blacklisted(ip):
+    return ip in BLACKLISTED_IPS
+
+def check_rate_limit(ip):
+    now = time.time()
+    if ip in rate_limit_dict:
+        count, last_time = rate_limit_dict[ip]
+        if now - last_time < RATE_LIMIT_WINDOW:
+            if count >= RATE_LIMIT_MAX:
+                return False
+            rate_limit_dict[ip] = (count + 1, last_time)
+            return True
+        rate_limit_dict[ip] = (1, now)
+        return True
+    rate_limit_dict[ip] = (1, now)
+    return True
+
+@app.route('/login', methods=['GET', 'POST'])
+def elec_officer_login():
+    ip = request.remote_addr
+    if is_ip_blacklisted(ip) or not check_rate_limit(ip):
+        log_audit(None, 'access_denied', ip, details="Rate limit or blacklist violation")
+        flash("Access denied due to rate limit or blacklist", 'error')
+        return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question="")
+    
+    if request.method == 'POST':
+        email = request.form['email'].strip()
+        password = request.form['password']
+        captcha_response = request.form['captcha']
+        captcha_answer = session.get('captcha_answer')  # Retrieve from session
+        
+        print(f"DEBUG: CAPTCHA response={captcha_response}, answer={captcha_answer}")  # Debug log
+        
+        if captcha_response != captcha_answer:
+            flash("CAPTCHA incorrect. Please try again.", 'error')
+            log_audit(None, 'failed_login', ip, details="Incorrect CAPTCHA")
+            captcha_question, captcha_answer = generate_captcha()
+            session['captcha_answer'] = captcha_answer  # Store new answer
+            return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, password, role FROM elec_officers WHERE email = %s", (email,))
+            officer = cursor.fetchone()
+            if officer:
+                officer_id, officer_name, hashed_password, role = officer
+                if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    if role == 'elec_officer':
+                        session['elec_officer_id'] = officer_id
+                        session['elec_officer_name'] = officer_name
+                        log_audit(officer_id, 'login_success', ip)
+                        flash("Login successful", 'message')
+                        return redirect(url_for('index'))
+                    else:
+                        log_audit(officer_id, 'failed_login_role', ip, details=f"Invalid role for {email}")
+                        flash("Invalid election officer role", 'error')
+                        captcha_question, captcha_answer = generate_captcha()
+                        session['captcha_answer'] = captcha_answer
+                        return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+                else:
+                    log_audit(None, 'failed_login_password', ip, details=f"Invalid password for {email}")
+                    flash("Invalid credentials", 'error')
+                    captcha_question, captcha_answer = generate_captcha()
+                    session['captcha_answer'] = captcha_answer
+                    return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+            else:
+                log_audit(None, 'failed_login_email', ip, details=f"Invalid email {email}")
+                flash("Invalid credentials", 'error')
+                captcha_question, captcha_answer = generate_captcha()
+                session['captcha_answer'] = captcha_answer
+                return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+        except Exception as e:
+            log_audit(None, 'failed_login_error', ip, details=str(e))
+            flash(f"Error: {e}", 'error')
+            captcha_question, captcha_answer = generate_captcha()
+            session['captcha_answer'] = captcha_answer
+            return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+        finally:
+            if conn:
+                conn.close()
+    else:
+        captcha_question, captcha_answer = generate_captcha()
+        session['captcha_answer'] = captcha_answer  # Store answer in session
+        return render_template_string(ELEC_OFFICER_LOGIN_TEMPLATE, captcha_question=captcha_question)
+
 @app.route('/')
+@require_elec_officer_login
 def index():
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM voters")
+        cursor.execute("SELECT id, name, email, age, sex, status FROM voters ORDER BY FIELD(status, 'submitted', 'accepted', 'rejected'), id")
         voters = cursor.fetchall()
+        log_audit(session['elec_officer_id'], 'view_voters', request.remote_addr)
         return render_template_string(VOTERS_TEMPLATE, voters=voters, message="Welcome to the Voter Registration App!")
     except Exception as e:
+        log_audit(session['elec_officer_id'], 'view_voters_error', request.remote_addr, details=str(e))
+        flash(f"Error loading voters: {e}", 'error')
         return render_template_string(VOTERS_TEMPLATE, voters=[], message=f"Error loading voters: {e}")
     finally:
         if conn:
             conn.close()
 
-@app.route('/add', methods=['POST'])
-def add_voter():
-    name = request.form['name']
-    email = request.form['email']
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO voters (name, email) VALUES (%s, %s)", (name, email))
-        conn.commit()
-    except Exception as e:
-        print(f"Error adding voter: {e}")
-    finally:
-        if conn:
-            conn.close()
-    return redirect(url_for('index'))
-
 @app.route('/edit/<int:voter_id>', methods=['GET', 'POST'])
+@require_elec_officer_login
 def edit_voter(voter_id):
     conn = None
     try:
@@ -176,24 +393,53 @@ def edit_voter(voter_id):
         if request.method == 'POST':
             name = request.form['name']
             email = request.form['email']
-            cursor.execute("UPDATE voters SET name = %s, email = %s WHERE id = %s", (name, email, voter_id))
+            age = request.form['age']
+            sex = request.form['sex']
+            status = request.form['status']
+            cursor.execute("UPDATE voters SET name = %s, email = %s, age = %s, sex = %s, status = %s WHERE id = %s", (name, email, age, sex, status, voter_id))
             conn.commit()
+            log_audit(session['elec_officer_id'], 'edit_voter', request.remote_addr, details=f"Edited voter ID {voter_id}")
+            flash("Voter updated successfully", 'message')
             return redirect(url_for('index'))
         else: # GET request to show edit form
-            cursor.execute("SELECT * FROM voters WHERE id = %s", (voter_id,))
+            cursor.execute("SELECT id, name, email, age, sex, status FROM voters WHERE id = %s", (voter_id,))
             voter = cursor.fetchone()
             if voter:
+                log_audit(session['elec_officer_id'], 'view_edit_voter', request.remote_addr, details=f"Viewing edit form for voter ID {voter_id}")
                 return render_template_string(VOTERS_TEMPLATE, edit_voter=voter, message=f"Editing Voter ID: {voter_id}")
             else:
+                log_audit(session['elec_officer_id'], 'view_edit_voter_error', request.remote_addr, details=f"Voter ID {voter_id} not found")
+                flash("Voter not found", 'error')
                 return redirect(url_for('index'))
     except Exception as e:
-        print(f"Error editing voter: {e}")
+        log_audit(session['elec_officer_id'], 'edit_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error editing voter: {e}", 'error')
         return redirect(url_for('index'))
     finally:
         if conn:
             conn.close()
 
+@app.route('/approve/<int:voter_id>', methods=['POST'])
+@require_elec_officer_login
+def approve_voter(voter_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE voters SET status = 'accepted' WHERE id = %s", (voter_id,))
+        conn.commit()
+        log_audit(session['elec_officer_id'], 'approve_voter', request.remote_addr, details=f"Approved voter ID {voter_id}")
+        flash("Voter approved successfully", 'message')
+    except Exception as e:
+        log_audit(session['elec_officer_id'], 'approve_voter_error', request.remote_addr, details=str(e))
+        flash(f"Error approving voter: {e}", 'error')
+    finally:
+        if conn:
+            conn.close()
+    return redirect(url_for('index'))
+
 @app.route('/delete/<int:voter_id>', methods=['POST'])
+@require_elec_officer_login
 def delete_voter(voter_id):
     conn = None
     try:
@@ -201,12 +447,22 @@ def delete_voter(voter_id):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM voters WHERE id = %s", (voter_id,))
         conn.commit()
+        log_audit(session['elec_officer_id'], 'delete_voter', request.remote_addr, details=f"Deleted voter ID {voter_id}")
+        flash("Voter deleted successfully", 'message')
     except Exception as e:
+        log_audit(session['elec_officer_id'], 'delete_voter_error', request.remote_addr, details=str(e))
         print(f"Error deleting voter: {e}")
     finally:
         if conn:
             conn.close()
     return redirect(url_for('index'))
+
+@app.route('/logout')
+def logout():
+    log_audit(session.get('elec_officer_id'), 'logout', request.remote_addr)
+    session.clear()
+    flash("Logged out successfully", 'message')
+    return redirect(url_for('elec_officer_login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=4000, debug=True)
