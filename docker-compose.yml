@@ -11,8 +11,7 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-password}
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
     depends_on:
-      db:
-        condition: service_healthy
+      - db
 
   voters_web:
     build: ./my-flask-app/voters_app
@@ -24,8 +23,7 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-password}
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
     depends_on:
-      db:
-        condition: service_healthy
+      - db
 
   voting_web:
     build: ./my-flask-app/voting_app
@@ -38,8 +36,24 @@ services:
       DB_NAME: ${MYSQL_DATABASE:-mydatabase}
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-a_default_secret_key}
     depends_on:
-      db:
-        condition: service_healthy
+      - db
+
+  db_viewer_web: # New service for the database viewer app
+    build: ./my-flask-app/db_viewer_app
+    ports:
+      - "5555:5555" # Map host port 6000 to container port 6000
+    environment:
+      DB_HOST: db
+      DB_USER: ${MYSQL_USER:-user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-password}
+      DB_NAME: ${MYSQL_DATABASE:-mydatabase}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-another_default_secret_key}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY} # Pass encryption key
+    depends_on:
+      - db
+      - candidates_web # Depends on other apps to ensure tables are created
+      - voters_web
+      - voting_web
 
   db:
     image: mysql:8.0
