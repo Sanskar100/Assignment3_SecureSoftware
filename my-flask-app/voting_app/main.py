@@ -189,7 +189,8 @@ VOTING_TEMPLATE = """
             <select id="candidate_id" name="candidate_id" required>
                 {% if candidates %}
                     {% for candidate in candidates %}
-                        <option value="{{ candidate[0] }}">{{ candidate[1] }} ({{ candidate[3] }})</option>
+                        <!-- Show candidate name and party so user can identify who to vote for -->
+                        <option value="{{ candidate[0] }}">Candidate {{ loop.index }} — {{ candidate[1] }} ({{ candidate[3] }})</option>
                     {% endfor %}
                 {% else %}
                     <option value="">No candidates available</option>
@@ -198,19 +199,7 @@ VOTING_TEMPLATE = """
             <input type="submit" value="Cast Vote">
         </form>
 
-        <div class="current-votes">
-            <h2>Current Vote Counts</h2>
-            {% if vote_counts %}
-                {% for count in vote_counts %}
-                    <div class="vote-item">
-                        <span>{{ count[0] }}</span>
-                        <span class="vote-count">{{ count[1] }} votes ({{ count[2] }})</span>
-                    </div>
-                {% endfor %}
-            {% else %}
-                <p>No votes cast yet.</p>
-            {% endif %}
-        </div>
+        <!-- Removed public display of current vote counts per request -->
 
         <div class="logout">
             <a href="/logout">Logout</a>
@@ -708,34 +697,16 @@ def index():
     
     conn = None
     candidates = []
-    vote_counts = []
+    vote_counts = []  # intentionally empty — do not show vote counts publicly
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get candidates
+        # Get candidates (used to populate the hidden/generic dropdown)
         cursor.execute("SELECT id, name, age, political_party FROM candidates")
         candidates = cursor.fetchall()
 
-        # Get total votes
-        cursor.execute("SELECT COUNT(*) FROM votes")
-        total_votes = cursor.fetchone()[0]
-
-        # Get vote counts per candidate
-        cursor.execute("""
-            SELECT c.name, COUNT(v.id) AS total_votes
-            FROM candidates c
-            LEFT JOIN votes v ON c.id = v.candidate_id
-            GROUP BY c.name
-            ORDER BY total_votes DESC;
-        """)
-        raw_vote_counts = cursor.fetchall()
-
-        # Calculate percentage for each candidate
-        vote_counts = []
-        for name, count in raw_vote_counts:
-            percent = (count / total_votes * 100) if total_votes > 0 else 0
-            vote_counts.append((name, count, f"{percent:.2f}%"))
+        # Do not query or compute vote totals here — removed per request
 
         return render_template_string(VOTING_TEMPLATE, candidates=candidates, vote_counts=vote_counts, voter_name=session.get('voter_name', 'Voter'))
     except Exception as e:
@@ -806,6 +777,35 @@ def vote():
     return redirect(url_for('index'))
 
 # New: secret for hashing voter ids (use a strong secret in prod via env)
+VOTE_HASH_SECRET = os.getenv('VOTE_HASH_SECRET', 'default_dev_vote_secret')
+
+# New helper: deterministic HMAC-based voter hash (so same voter -> same hash, but not reversible without secret)
+def make_voter_hash(voter_id):
+    # ensure string input
+    msg = str(voter_id).encode('utf-8')
+    key = VOTE_HASH_SECRET.encode('utf-8')
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()
+
+def wait_for_db(max_retries=60, retry_delay=2):
+    retries = 0
+    while retries < max_retries:
+        try:
+            conn = get_db_connection()
+            conn.close()
+            print("DB connection successful.")
+            init_db()  # Call init_db() here, after confirming the DB is ready
+            return True
+        except mysql.connector.Error as err:
+            print(f"DB not ready yet: {err}. Retrying in {retry_delay} seconds...")
+            time.sleep(retry_delay)
+            retries += 1
+    print("Failed to connect to DB after max retries.")
+    return False
+
+if __name__ == '__main__':
+    if not wait_for_db():
+        exit(1)  # Exit if DB never becomes ready
+    app.run(host='0.0.0.0', port=2000, debug=True)
 VOTE_HASH_SECRET = os.getenv('VOTE_HASH_SECRET', 'default_dev_vote_secret')
 
 # New helper: deterministic HMAC-based voter hash (so same voter -> same hash, but not reversible without secret)
