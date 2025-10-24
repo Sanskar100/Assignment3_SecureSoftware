@@ -1,10 +1,13 @@
-from flask import Flask, render_template_string, request, redirect, url_for, flash, session
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session, Response
 import os
 import mysql.connector
 import bcrypt
 import random
 import time
 import re
+import hashlib
+import xml.etree.ElementTree as ET
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'a_super_secret_key_for_dev')
@@ -106,6 +109,7 @@ HOME_TEMPLATE = """
            <a class="nav-link" href="/manage_voters">Manage Voters</a> |
            <a class="nav-link" href="/manage_elec_officers">Manage Election Officers</a> |
            <a class="nav-link" href="/audit_logs">View Audit Logs</a> |
+           <a class="nav-link" href="/export_tally">Download Tally (XML)</a> |
            <a class="logout-link" href="/logout">Logout</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -1188,6 +1192,66 @@ def logout():
     session.clear()
     flash("Logged out successfully", 'message')
     return redirect(url_for('login'))
+
+# New route: export tally as XML with checksum
+@app.route('/export_tally')
+@require_admin_login
+def export_tally():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                c.id, c.name,
+                COUNT(v.id) AS votes
+            FROM candidates c
+            LEFT JOIN votes v ON c.id = v.candidate_id
+            GROUP BY c.id
+            ORDER BY votes DESC, c.id ASC
+        """)
+        rows = cursor.fetchall()
+
+        # Build XML where each Candidate includes only Name and Votes
+        root = ET.Element('Tally')
+        candidates_el = ET.SubElement(root, 'Candidates')
+
+        for r in rows:
+            cand = ET.SubElement(candidates_el, 'Candidate')
+            ET.SubElement(cand, 'Name').text = r[1] or ''
+            ET.SubElement(cand, 'Votes').text = str(r[2] or 0)
+
+        # Add blank line (extra newline) between each Candidate element for readability
+        # and ensure the Candidates container starts on a new line.
+        candidates_el.text = '\n'
+        for cand in list(candidates_el):
+            # put an extra newline after each candidate to create a blank line between entries
+            cand.tail = '\n\n'
+
+        xml_without_checksum = ET.tostring(root, encoding='utf-8', method='xml')
+        checksum = hashlib.sha256(xml_without_checksum).hexdigest()
+
+        # Append checksum element
+        checksum_el = ET.SubElement(root, 'Checksum')
+        checksum_el.text = checksum
+        # ensure the checksum sits on its own line after the Candidates section
+        checksum_el.tail = '\n'
+
+        final_xml = ET.tostring(root, encoding='utf-8', method='xml')
+
+        filename = f"tally_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.xml"
+        log_audit(session['admin_id'], 'export_tally', request.remote_addr, details=f"Exported tally, checksum={checksum}")
+
+        return Response(final_xml, mimetype='application/xml', headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        })
+    except Exception as e:
+        log_audit(session.get('admin_id'), 'export_tally_error', request.remote_addr, details=str(e))
+        flash(f"Error exporting tally: {e}", 'error')
+        return redirect(url_for('index'))
+    finally:
+        if conn:
+            conn.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=3000, debug=True)
